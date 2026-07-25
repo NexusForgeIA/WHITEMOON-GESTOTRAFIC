@@ -14,7 +14,7 @@ formulario, ni el Kanban, ni la subida de documentos, ni la base de datos.
 
 | Trámite | Cálculo fiscal | Genera documento | Docs obligatorios |
 |---|---|---|---|
-| Transferencia de vehículo | **ITP** (`gestotrafic-itp`) | Contrato de compraventa | 5 |
+| Transferencia de vehículo | **ITP** (`gestotrafic-itp`) · exención manual | Contrato de compraventa | 5 (varían según vendedor) |
 | Matriculación | — (IEDMT manual) | — | 5 |
 | Notificación de venta | — | Comunicación de venta | 4 |
 | Baja temporal | — | — | 3 |
@@ -53,7 +53,7 @@ formulario, ni el Kanban, ni la subida de documentos, ni la base de datos.
 |---|---|
 | `n` | nombre del campo |
 | `l` | etiqueta visible |
-| `t` | `text` · `date` · `number` · `select` · `textarea` |
+| `t` | `text` · `date` · `number` · `select` · `textarea` · `empresa` |
 | `col` | `1` → se guarda en su **columna** de la tabla; si se omite, va a `datos` (jsonb) |
 | `req` | obligatorio |
 | `ph` | placeholder |
@@ -61,6 +61,12 @@ formulario, ni el Kanban, ni la subida de documentos, ni la base de datos.
 | `def` | valor por defecto |
 | `paso` | `step` para números |
 | `full` | ocupa el ancho completo |
+| `soloSi` | `{campo, valor}` → el campo solo se muestra si otro campo tiene ese valor |
+| `autoSi` | el campo lo rellena la aplicación (solo lectura) en ese modo |
+| `lSi` | etiqueta alternativa cuando el campo está en modo `autoSi` |
+
+`t: 'empresa'` renderiza un desplegable con los **clientes de tipo empresa**
+del CRM. Se usa para elegir la empresa vendedora de una transferencia.
 
 **Regla práctica:** usa `col: 1` solo si el campo se consulta o se lista (marca,
 modelo, matrícula, titular…). Todo lo específico de un trámite va a `datos`,
@@ -103,6 +109,43 @@ su checklist, entra en el Kanban y aparece en el filtro por trámite del listado
 - **El motor de cálculo.** `calculo: 'itp'` enchufa la Edge Function
   `gestotrafic-itp`. Un cálculo distinto (por ejemplo el IEDMT) necesitaría su
   propio motor: no se improvisa desde el catálogo.
+
+---
+
+## Vendedor particular o empresa en la Transferencia
+
+La transferencia distingue **quién vende**:
+
+| | Vendedor particular | Vendedor empresa / concesionario |
+|---|---|---|
+| Datos del vendedor | se escriben a mano | se **vuelcan** de su ficha de cliente (solo lectura) |
+| Identificación | DNI / NIE del vendedor | **CIF** de la empresa vendedora |
+| Documento de la venta | **Contrato de compraventa** | **Factura de venta** |
+| ITP | lo calcula `gestotrafic-itp` | lo calcula igual, salvo exención confirmada |
+
+El tipo se guarda en `datos.vendedor_tipo` y la empresa elegida en
+`datos.vendedor_empresa_id`. Los datos volcados siguen escribiéndose en las
+mismas columnas de siempre (`vendedor_nombre`, `vendedor_nif`,
+`vendedor_direccion`, `vendedor_telefono`): **no hubo migración de esquema**.
+
+El checklist se adapta con la misma mecánica de `si` que el resto del catálogo.
+
+### Exención de ITP · decisión del gestor, nunca automática
+
+Cuando una empresa vende con **factura sujeta a IVA**, la transmisión suele
+quedar **exenta de ITP**. GestoTrafic **no lo deduce solo**: expone un toggle
+—*Operación con factura (exenta de ITP)*— que confirma el gestor.
+
+Al marcarlo:
+
+- `itp_importe` pasa a **0** y el expediente muestra **Exento**
+- `total_impuestos` se reduce a la **tasa DGT** (que se sigue liquidando)
+- `datos.itp_exento` queda a `true`
+- `calculo_json` **conserva íntegro** el resultado del motor, de modo que la
+  exención es auditable y **reversible**: al desmarcarla se recupera el importe
+
+La transferencia entre particulares no cambia: calcula el ITP con
+`gestotrafic-itp` exactamente como antes.
 
 ---
 

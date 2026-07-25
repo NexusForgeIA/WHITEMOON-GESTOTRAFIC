@@ -17,13 +17,18 @@
      docs      · checklist documental
 
    Cada CAMPO declara:
-     n    · nombre. Con col:1 se guarda en su columna; si no, en datos jsonb
-     l    · etiqueta
-     t    · text | date | number | select | textarea
-     req  · obligatorio
-     ph   · placeholder
-     op   · opciones (para select)
-     full · ocupa el ancho completo
+     n     · nombre. Con col:1 se guarda en su columna; si no, en datos jsonb
+     l     · etiqueta
+     t     · text | date | number | select | textarea | empresa
+             'empresa' = desplegable de clientes-empresa del CRM
+     req   · obligatorio
+     ph    · placeholder
+     op    · opciones (para select)
+     full  · ocupa el ancho completo
+     soloSi· { campo, valor } → el campo solo se muestra si otro campo
+             del formulario tiene ese valor (visibilidad condicional)
+     autoSi· 'empresa' → en ese modo lo rellena la aplicación (solo lectura)
+     lSi   · etiqueta alternativa mientras el campo está en modo autoSi
 
    Cada DOCUMENTO declara:
      tipo, label, obligatorio y opcionalmente `si`: función que
@@ -53,6 +58,33 @@
     { n: 'vendedor_nif',       l: 'DNI / NIF',          t: 'text', col: 1, ph: '11223344A' },
     { n: 'vendedor_direccion', l: 'Domicilio',          t: 'text', col: 1, ph: 'Av. de España 22, Madrid' },
     { n: 'vendedor_telefono',  l: 'Teléfono',           t: 'text', col: 1, ph: '600 111 222' }
+  ];
+
+  /* Vendedor de una TRANSFERENCIA: puede ser particular o empresa.
+     Si es empresa, el gestor elige la empresa vendedora del listado de
+     clientes del CRM y los tres campos de identidad se vuelcan solos. */
+  const vendedorTipo = {
+    n: 'vendedor_tipo', l: '¿Quién vende el vehículo?', t: 'select', full: 1, def: 'particular',
+    op: [
+      { v: 'particular', l: 'Particular' },
+      { v: 'empresa',    l: 'Empresa / concesionario' }
+    ]
+  };
+
+  const vendedorEmpresaSel = {
+    n: 'vendedor_empresa_id', l: 'Empresa vendedora (clientes del CRM)', t: 'empresa', full: 1,
+    soloSi: { campo: 'vendedor_tipo', valor: 'empresa' }
+  };
+
+  /* Los datos de identidad son los mismos campos de siempre (mismas columnas):
+     con vendedor particular se escriben a mano, con empresa se vuelcan. */
+  const vendedorTransferencia = [
+    vendedorTipo,
+    vendedorEmpresaSel,
+    { n: 'vendedor_nombre',    l: 'Nombre y apellidos', t: 'text', col: 1, ph: 'Antonio Ruiz Pérez', autoSi: 'empresa', lSi: 'Razón social' },
+    { n: 'vendedor_nif',       l: 'DNI / NIF',          t: 'text', col: 1, ph: '11223344A',          autoSi: 'empresa', lSi: 'CIF' },
+    { n: 'vendedor_direccion', l: 'Domicilio',          t: 'text', col: 1, ph: 'Av. de España 22, Madrid', autoSi: 'empresa', lSi: 'Domicilio social' },
+    { n: 'vendedor_telefono',  l: 'Teléfono',           t: 'text', col: 1, ph: '600 111 222',        autoSi: 'empresa' }
   ];
 
   const comprador = [
@@ -115,7 +147,7 @@
             }
           ]
         },
-        { t: 'Vendedor', campos: vendedor },
+        { t: 'Vendedor', campos: vendedorTransferencia },
         { t: 'Comprador', campos: comprador, copiarCliente: true },
         {
           t: 'Fiscalidad',
@@ -127,8 +159,25 @@
         }
       ],
       docs: [
-        D.dniComprador, D.dniVendedor, D.permiso, D.fichaTecnica,
-        { tipo: 'contrato', label: 'Contrato de compraventa', obligatorio: true },
+        D.dniComprador,
+        {
+          tipo: 'dni_vendedor', label: 'DNI / NIE del vendedor', obligatorio: true,
+          si: (exp) => !esVendedorEmpresa(exp)
+        },
+        {
+          tipo: 'cif_vendedor', label: 'CIF de la empresa vendedora', obligatorio: true,
+          si: (exp) => esVendedorEmpresa(exp)
+        },
+        D.permiso, D.fichaTecnica,
+        /* Un particular firma contrato de compraventa; una empresa emite factura. */
+        {
+          tipo: 'contrato', label: 'Contrato de compraventa', obligatorio: true,
+          si: (exp) => !esVendedorEmpresa(exp)
+        },
+        {
+          tipo: 'factura_venta', label: 'Factura de venta (empresa vendedora)', obligatorio: true,
+          si: (exp) => esVendedorEmpresa(exp)
+        },
         { tipo: 'itv', label: 'ITV en vigor', obligatorio: false },
         D.otros
       ]
@@ -332,6 +381,16 @@
     return TRAMITES.find(t => t.id === id) || TRAMITES[0];
   }
 
+  /** ¿El vendedor del expediente es una empresa / concesionario? */
+  function esVendedorEmpresa(exp) {
+    return leer(exp, 'vendedor_tipo') === 'empresa';
+  }
+
+  /** ¿El gestor ha confirmado que la operación está exenta de ITP? */
+  function esExentoITP(exp) {
+    return leer(exp, 'itp_exento') === true;
+  }
+
   /** Lee el valor de un campo, esté en columna propia o en `datos`. */
   function leer(exp, nombre) {
     if (!exp) return null;
@@ -365,6 +424,8 @@
     leer: leer,
     campos: campos,
     docsDe: docsDe,
-    etiquetaOpcion: etiquetaOpcion
+    etiquetaOpcion: etiquetaOpcion,
+    esVendedorEmpresa: esVendedorEmpresa,
+    esExentoITP: esExentoITP
   };
 })(window);

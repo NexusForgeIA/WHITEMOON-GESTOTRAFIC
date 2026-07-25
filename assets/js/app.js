@@ -118,6 +118,109 @@
     return back;
   }
 
+  /* ============================================================
+     Desplegable estilizado (gt-sel)
+     ------------------------------------------------------------
+     Un <select> nativo pinta la lista desplegada con los colores del
+     sistema operativo: sobre fondo oscuro las opciones no seleccionadas
+     quedan grises e ilegibles. Este componente pinta la lista con el
+     sistema de diseño del CRM, mantiene contraste AA en todas las
+     opciones y es navegable con teclado.
+     ============================================================ */
+  function gtSelect({ opciones, valor, onChange, etiqueta }) {
+    const wrap = document.createElement('div');
+    wrap.className = 'gt-sel';
+    const actual = () => opciones.find(o => o.id === valor) || opciones[0];
+
+    wrap.innerHTML = `
+      <button type="button" class="gt-sel-btn" aria-haspopup="listbox" aria-expanded="false"
+              ${etiqueta ? `aria-label="${h(etiqueta)}"` : ''}>
+        <span class="gt-sel-dot"></span>
+        <span class="gt-sel-val"></span>
+        ${svg('<path d="m6 9 6 6 6-6"/>', 'gt-sel-chev')}
+      </button>
+      <ul class="gt-sel-list" role="listbox" hidden>
+        ${opciones.map(o => `<li class="gt-sel-opt" role="option" tabindex="-1" data-v="${h(o.id)}">
+          <span class="gt-sel-dot" style="background:${h(o.color || '#8888a0')}"></span>
+          <span class="gt-sel-opt-txt">${h(o.label)}</span>
+          ${svg('<path d="M20 6 9 17l-5-5"/>', 'gt-sel-check')}
+        </li>`).join('')}
+      </ul>`;
+
+    const btn = wrap.querySelector('.gt-sel-btn');
+    const lista = wrap.querySelector('.gt-sel-list');
+    const opts = Array.prototype.slice.call(wrap.querySelectorAll('.gt-sel-opt'));
+
+    function pintar() {
+      const o = actual();
+      wrap.querySelector('.gt-sel-val').textContent = o.label;
+      btn.querySelector('.gt-sel-dot').style.background = o.color || '#8888a0';
+      opts.forEach(el => {
+        const sel = el.dataset.v === valor;
+        el.classList.toggle('sel', sel);
+        el.setAttribute('aria-selected', sel ? 'true' : 'false');
+      });
+    }
+
+    function fuera(e) { if (!wrap.contains(e.target)) abrir(false); }
+
+    function abrir(on) {
+      lista.hidden = !on;
+      wrap.classList.toggle('open', on);
+      btn.setAttribute('aria-expanded', on ? 'true' : 'false');
+      if (on) {
+        document.addEventListener('mousedown', fuera);
+        (opts.find(o => o.dataset.v === valor) || opts[0]).focus();
+      } else {
+        document.removeEventListener('mousedown', fuera);
+      }
+    }
+
+    async function elegir(v) {
+      abrir(false);
+      btn.focus();
+      if (v === valor) return;
+      const previo = valor;
+      valor = v;
+      pintar();
+      try {
+        await onChange(v);
+      } catch (err) {
+        valor = previo;
+        pintar();
+        toast(err.message || 'No se pudo cambiar el estado', 'err');
+      }
+    }
+
+    btn.addEventListener('click', () => abrir(lista.hidden));
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir(true); }
+    });
+
+    opts.forEach((el, i) => {
+      el.addEventListener('click', () => elegir(el.dataset.v));
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown')       { e.preventDefault(); opts[Math.min(i + 1, opts.length - 1)].focus(); }
+        else if (e.key === 'ArrowUp')    { e.preventDefault(); opts[Math.max(i - 1, 0)].focus(); }
+        else if (e.key === 'Home')       { e.preventDefault(); opts[0].focus(); }
+        else if (e.key === 'End')        { e.preventDefault(); opts[opts.length - 1].focus(); }
+        else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); elegir(el.dataset.v); }
+        else if (e.key === 'Escape')     { e.preventDefault(); abrir(false); btn.focus(); }
+      });
+    });
+
+    pintar();
+    return wrap;
+  }
+
+  /** Desplegable de estado del expediente, con los colores del catálogo. */
+  const selectorEstado = (valor, onChange) => gtSelect({
+    opciones: window.GT_ESTADOS,
+    valor,
+    onChange,
+    etiqueta: 'Estado del expediente'
+  });
+
   const val = (root, name) => {
     const el = root.querySelector(`[name="${name}"]`);
     if (!el) return null;
@@ -134,12 +237,29 @@
      Renderizado de campos desde el catálogo
      ============================================================ */
 
+  /* Clientes con tipo `empresa`. Se refresca al entrar en las vistas que
+     necesitan elegir una empresa vendedora. */
+  let empresas = [];
+
+  async function cargarClientes() {
+    const clientes = await GTApi.listarClientes();
+    empresas = clientes.filter(c => c.tipo === 'empresa');
+    return clientes;
+  }
+
   function campoHTML(c, valor) {
     const id = 'f-' + c.n;
     const req = c.req ? 'required' : '';
     let control;
 
-    if (c.t === 'select') {
+    if (c.t === 'empresa') {
+      const ops = ['<option value="">— Selecciona la empresa vendedora —</option>'].concat(
+        empresas.map(e => `<option value="${h(e.id)}" ${String(valor) === String(e.id) ? 'selected' : ''}>${h(nombreCliente(e))} · ${h(e.nif)}</option>`)
+      ).join('');
+      control = `<select name="${h(c.n)}" id="${id}">${ops}</select>`
+        + (empresas.length ? '' : `<small class="field-hint">No hay clientes de tipo <b>empresa</b>. <a href="#/clientes">Da de alta el concesionario</a> para poder seleccionarlo.</small>`);
+
+    } else if (c.t === 'select') {
       const ops = (c.op || []).map(o => {
         const v = (typeof o === 'string') ? o : o.v;
         const l = (typeof o === 'string') ? o : o.l;
@@ -160,25 +280,41 @@
         ${c.ph ? `placeholder="${h(c.ph)}"` : ''} ${req}>`;
     }
 
-    return `<div class="field ${c.full || c.t === 'textarea' ? 'full' : ''}">
-      <label for="${id}">${h(c.l)}${c.req ? ' *' : ''}</label>${control}</div>`;
+    return `<div class="field ${c.full || c.t === 'textarea' ? 'full' : ''}"
+      data-campo="${h(c.n)}"
+      ${c.soloSi ? `data-solo-si="${h(c.soloSi.campo)}" data-solo-si-val="${h(c.soloSi.valor)}"` : ''}
+      ${c.autoSi ? `data-auto-si="${h(c.autoSi)}"` : ''}>
+      <label for="${id}" data-l="${h(c.l)}" ${c.lSi ? `data-l-si="${h(c.lSi)}"` : ''}>${h(c.l)}${c.req ? ' *' : ''}</label>${control}</div>`;
   }
+
+  /** Aviso que acompaña a la sección de vendedor cuando vende una empresa. */
+  const notaEmpresa = () => `<div class="empresa-note hidden" data-nota-empresa>
+    ${svg('<path d="M3 21h18M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/>')}
+    <div>Los datos del vendedor se <b>vuelcan de su ficha de cliente</b>: no se escriben a mano.
+      El expediente pedirá <b>Factura de venta</b> en lugar de contrato de compraventa.</div>
+  </div>`;
 
   /** `conCopiar` solo en el alta: es donde existe el selector de cliente. */
   function seccionesHTML(tr, exp, conCopiar) {
-    return tr.secciones.map(s => `
+    return tr.secciones.map(s => {
+      const conEmpresa = s.campos.some(c => c.t === 'empresa');
+      return `
       <div class="form-sec">${h(s.t)}</div>
       ${(conCopiar && s.copiarCliente) ? `<label class="flex" style="font-size:.8rem;color:var(--muted);margin-bottom:12px;cursor:pointer">
         <input type="checkbox" data-copiar="${h(s.t)}" style="width:auto"> Rellenar con los datos del cliente seleccionado
       </label>` : ''}
+      ${conEmpresa ? notaEmpresa() : ''}
       <div class="form-grid">
         ${s.campos.map(c => campoHTML(c, exp ? T.leer(exp, c.n) : null)).join('')}
-      </div>`).join('');
+      </div>`;
+    }).join('');
   }
 
-  /** Separa los valores del formulario en columnas propias y en `datos` jsonb. */
-  function recoger(root, tr) {
-    const fila = {}, datos = {};
+  /** Separa los valores del formulario en columnas propias y en `datos` jsonb.
+      `exp` conserva las claves de `datos` que no son campos del catálogo
+      (por ejemplo `itp_exento`, que se marca desde la pestaña de ITP). */
+  function recoger(root, tr, exp) {
+    const fila = {}, datos = Object.assign({}, (exp && exp.datos) || {});
     T.campos(tr).forEach(c => {
       let v = c.t === 'number' ? num(root, c.n) : val(root, c.n);
       if (c.t === 'number' && (v === null || isNaN(v))) v = null;
@@ -186,6 +322,56 @@
     });
     fila.datos = datos;
     return fila;
+  }
+
+  /* ------------------------------------------------------------
+     Vendedor particular / empresa
+     Si el vendedor es una empresa, el gestor la elige del listado de
+     clientes y sus datos se vuelcan: no se reescriben a mano.
+     ------------------------------------------------------------ */
+  const CAMPOS_VENDEDOR = ['vendedor_nombre', 'vendedor_nif', 'vendedor_direccion', 'vendedor_telefono'];
+
+  function activarVendedorEmpresa(root) {
+    const selTipo = root.querySelector('[name="vendedor_tipo"]');
+    if (!selTipo) return;                       // trámite sin vendedor configurable
+    const selEmpresa = root.querySelector('[name="vendedor_empresa_id"]');
+
+    const set = (n, v) => { const el = root.querySelector(`[name="${n}"]`); if (el) el.value = v || ''; };
+
+    function volcar() {
+      const c = empresas.find(e => e.id === (selEmpresa && selEmpresa.value));
+      if (!c) return;
+      set('vendedor_nombre', c.razon_social || c.nombre);
+      set('vendedor_nif', c.nif);
+      set('vendedor_direccion', [c.direccion, c.cp, c.ciudad].filter(Boolean).join(', '));
+      set('vendedor_telefono', c.telefono);
+    }
+
+    function sincronizar(volcarAhora) {
+      const esEmpresa = selTipo.value === 'empresa';
+
+      root.querySelectorAll('[data-solo-si]').forEach(f => {
+        const dep = root.querySelector(`[name="${f.dataset.soloSi}"]`);
+        f.classList.toggle('hidden', !dep || dep.value !== f.dataset.soloSiVal);
+      });
+
+      root.querySelectorAll('[data-auto-si="empresa"]').forEach(f => {
+        const input = f.querySelector('input');
+        const lbl = f.querySelector('label');
+        if (input) input.readOnly = esEmpresa;
+        if (lbl && lbl.dataset.lSi) lbl.textContent = esEmpresa ? lbl.dataset.lSi : lbl.dataset.l;
+        f.classList.toggle('is-auto', esEmpresa);
+      });
+
+      const nota = root.querySelector('[data-nota-empresa]');
+      if (nota) nota.classList.toggle('hidden', !esEmpresa);
+
+      if (esEmpresa && volcarAhora) volcar();
+    }
+
+    selTipo.addEventListener('change', () => sincronizar(true));
+    if (selEmpresa) selEmpresa.addEventListener('change', volcar);
+    sincronizar(false);                         // al pintar no se pisa lo ya guardado
   }
 
   /** Rellena los campos de "persona" de una sección con los datos del cliente. */
@@ -517,7 +703,9 @@
             <td>${h([e.marca, e.modelo].filter(Boolean).join(' ') || '—')}</td>
             <td class="t-mono">${h(e.matricula || '—')}</td>
             <td><span class="badge badge-${h(e.estado)}">${h(estadoInfo(e.estado).label)}</span></td>
-            <td class="t-num">${T.tramite(e.tipo_tramite).calculo === 'itp' ? eur(e.total_impuestos) : '<span class="t-muted">n/a</span>'}</td>
+            <td class="t-num">${T.tramite(e.tipo_tramite).calculo !== 'itp'
+              ? '<span class="t-muted">n/a</span>'
+              : (T.esExentoITP(e) ? '<span class="badge badge-exento">Exento</span>' : eur(e.total_impuestos))}</td>
           </tr>`).join('')}</tbody></table></div>`
         : `<div class="empty">
             ${svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>')}
@@ -567,7 +755,7 @@
 
     const tr = T.tramite(tipoPre);
     loading('Preparando formulario…');
-    const clientes = await GTApi.listarClientes();
+    const clientes = await cargarClientes();
 
     view.innerHTML = `
       ${cabecera()}
@@ -611,6 +799,7 @@
       ${footer()}`;
 
     const form = view.querySelector('#form-exp');
+    activarVendedorEmpresa(form);
 
     form.querySelectorAll('[data-copiar]').forEach(chk => {
       chk.addEventListener('change', () => {
@@ -689,7 +878,11 @@
      ============================================================ */
   async function vistaExpediente(id) {
     loading('Cargando expediente…');
-    const [exp, docs] = await Promise.all([GTApi.obtenerExpediente(id), GTApi.listarDocumentos(id)]);
+    const [exp, docs] = await Promise.all([
+      GTApi.obtenerExpediente(id),
+      GTApi.listarDocumentos(id),
+      cargarClientes()                          // alimenta el selector de empresa vendedora
+    ]);
     const tr = T.tramite(exp.tipo_tramite);
 
     const pestanas = [];
@@ -712,9 +905,7 @@
           </p>
         </div>
         <div class="row-actions">
-          <select id="sel-estado" class="tab" style="padding:8px 13px">
-            ${window.GT_ESTADOS.map(e => `<option value="${h(e.id)}" ${exp.estado === e.id ? 'selected' : ''}>${h(e.label)}</option>`).join('')}
-          </select>
+          <div id="slot-estado"></div>
           ${GTAuth.isAdmin() ? `<button class="btn btn-danger btn-sm" id="btn-borrar-exp">Eliminar</button>` : ''}
         </div>
       </div>
@@ -741,13 +932,13 @@
       paneles[t.dataset.tab]();
     }));
 
-    view.querySelector('#sel-estado').addEventListener('change', async (e) => {
-      try {
-        await GTApi.actualizarExpediente(id, { estado: e.target.value });
-        exp.estado = e.target.value;
-        toast('Estado actualizado: ' + estadoInfo(e.target.value).label, 'ok');
-      } catch (err) { toast(err.message, 'err'); }
-    });
+    view.querySelector('#slot-estado').appendChild(
+      selectorEstado(exp.estado, async (nuevo) => {
+        await GTApi.actualizarExpediente(id, { estado: nuevo });
+        exp.estado = nuevo;
+        toast('Estado actualizado: ' + estadoInfo(nuevo).label, 'ok');
+      })
+    );
 
     const btnDel = view.querySelector('#btn-borrar-exp');
     if (btnDel) btnDel.addEventListener('click', () => modal({
@@ -764,6 +955,7 @@
 
   /* ---------- Panel: Calculadora ITP (solo transferencia) ---------- */
   function panelITP(exp, cont) {
+    const vendeEmpresa = T.esVendedorEmpresa(exp);
     cont.innerHTML = `
       <div class="detail-grid">
         <div class="itp-panel">
@@ -815,16 +1007,29 @@
             </div>
           </div>
 
+          <label class="gt-toggle">
+            <input type="checkbox" id="chk-exento" ${T.esExentoITP(exp) ? 'checked' : ''}>
+            <span class="gt-toggle-track"><span class="gt-toggle-knob"></span></span>
+            <span class="gt-toggle-txt">
+              <b>Operación con factura (exenta de ITP)</b>
+              <small>Venta de empresa documentada con factura sujeta a IVA. <b>Lo confirma el gestor</b>: nunca se marca solo. La tasa DGT se sigue liquidando.</small>
+            </span>
+          </label>
+          ${vendeEmpresa ? `<div class="empresa-note" style="margin-bottom:14px">
+            ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
+            <div>El vendedor de este expediente es una <b>empresa</b>. Si emite factura con IVA, la transmisión suele quedar <b>exenta de ITP</b>: revísalo y márcalo arriba si procede.</div>
+          </div>` : ''}
+
           <button class="btn btn-full" id="btn-calcular" style="margin-top:6px">Calcular ITP y tasas</button>
 
           <div class="itp-out" id="itp-out">
-            <div class="itp-cell"><div class="itp-cell-num" id="c-venal">${exp.valor_venal != null ? eur(exp.valor_venal) : '—'}</div><div class="itp-cell-lbl">Valor venal</div></div>
-            <div class="itp-cell"><div class="itp-cell-num" id="c-itp">${exp.itp_importe != null ? eur(exp.itp_importe) : '—'}</div><div class="itp-cell-lbl">ITP</div></div>
-            <div class="itp-cell"><div class="itp-cell-num" id="c-dgt">${exp.tasa_dgt != null ? eur(exp.tasa_dgt) : '—'}</div><div class="itp-cell-lbl">Tasa DGT</div></div>
-            <div class="itp-cell total"><div class="itp-cell-num" id="c-total">${exp.total_impuestos != null ? eur(exp.total_impuestos) : '—'}</div><div class="itp-cell-lbl">Total</div></div>
+            <div class="itp-cell"><div class="itp-cell-num" id="c-venal">—</div><div class="itp-cell-lbl">Valor venal</div></div>
+            <div class="itp-cell"><div class="itp-cell-num" id="c-itp">—</div><div class="itp-cell-lbl">ITP</div></div>
+            <div class="itp-cell"><div class="itp-cell-num" id="c-dgt">—</div><div class="itp-cell-lbl">Tasa DGT</div></div>
+            <div class="itp-cell total"><div class="itp-cell-num" id="c-total">—</div><div class="itp-cell-lbl">Total</div></div>
           </div>
 
-          <div class="itp-detail" id="itp-detail">${exp.calculo_json ? detalleTexto(exp.calculo_json) : 'Introduce el valor BOE del vehículo y pulsa <b>Calcular</b> para obtener el ITP, la tasa DGT y el valor venal.'}</div>
+          <div class="itp-detail" id="itp-detail"></div>
         </div>
 
         <div class="stack">
@@ -842,6 +1047,57 @@
           ${avisoRegulado()}
         </div>
       </div>`;
+
+    /* Celdas y detalle se pintan siempre desde `exp`, para que el cálculo y
+       la exención compartan una única fuente de verdad. */
+    function pintarResultado() {
+      const exento = T.esExentoITP(exp);
+      cont.querySelector('#c-venal').textContent = exp.valor_venal != null ? eur(exp.valor_venal) : '—';
+      cont.querySelector('#c-dgt').textContent   = exp.tasa_dgt != null ? eur(exp.tasa_dgt) : '—';
+      cont.querySelector('#c-total').textContent = exp.total_impuestos != null ? eur(exp.total_impuestos) : '—';
+
+      const celda = cont.querySelector('#c-itp');
+      celda.innerHTML = exento
+        ? '<span class="itp-exento">Exento</span>'
+        : h(exp.itp_importe != null ? eur(exp.itp_importe) : '—');
+      celda.closest('.itp-cell').classList.toggle('exento', exento);
+
+      const base = exp.calculo_json
+        ? detalleTexto(exp.calculo_json)
+        : 'Introduce el valor BOE del vehículo y pulsa <b>Calcular</b> para obtener el ITP, la tasa DGT y el valor venal.';
+
+      cont.querySelector('#itp-detail').innerHTML = exento
+        ? `<div class="itp-exento-nota"><b>Operación exenta de ITP</b>, confirmada por el gestor:
+             venta con factura de empresa sujeta a IVA. El ITP del expediente queda en <b>0,00 €</b>
+             y el total se reduce a la tasa DGT.</div>` + base
+        : base;
+    }
+    pintarResultado();
+
+    cont.querySelector('#chk-exento').addEventListener('change', async (ev) => {
+      const chk = ev.target;
+      const exento = chk.checked;
+      const calc = exp.calculo_json || {};
+      const datos = Object.assign({}, exp.datos || {}, { itp_exento: exento });
+
+      // Al retirar la exención se recupera el importe que devolvió el motor.
+      const cambios = exento
+        ? { datos, itp_importe: 0, total_impuestos: exp.tasa_dgt != null ? Number(exp.tasa_dgt) : null }
+        : { datos, itp_importe: calc.itp ?? null, total_impuestos: calc.total_impuestos ?? null };
+
+      chk.disabled = true;
+      try {
+        await GTApi.actualizarExpediente(exp.id, cambios);
+        Object.assign(exp, cambios);
+        pintarResultado();
+        toast(exento ? 'Expediente marcado como exento de ITP' : 'Exención de ITP retirada', 'ok');
+      } catch (err) {
+        chk.checked = !exento;
+        toast(err.message || 'No se pudo guardar la exención', 'err');
+      } finally {
+        chk.disabled = false;
+      }
+    });
 
     cont.querySelector('#btn-calcular').addEventListener('click', async () => {
       const btn = cont.querySelector('#btn-calcular');
@@ -866,11 +1122,12 @@
       try {
         const r = await GTApi.calcularITP(payload);
 
-        cont.querySelector('#c-venal').textContent = eur(r.valor_venal);
-        cont.querySelector('#c-itp').textContent = eur(r.itp);
-        cont.querySelector('#c-dgt').textContent = eur(r.tasa_dgt);
-        cont.querySelector('#c-total').textContent = eur(r.total_impuestos);
-        cont.querySelector('#itp-detail').innerHTML = detalleTexto(r);
+        /* La exención la decide el gestor, no el motor: si está marcada se
+           respeta y solo queda la tasa DGT. `calculo_json` guarda siempre el
+           resultado íntegro del motor para poder auditarlo y revertirla. */
+        const exento = T.esExentoITP(exp);
+        const itpFinal = exento ? 0 : r.itp;
+        const totalFinal = exento ? r.tasa_dgt : r.total_impuestos;
 
         await GTApi.actualizarExpediente(exp.id, {
           valor_boe: payload.valor_boe,
@@ -883,20 +1140,21 @@
           uso_especial: payload.uso_especial,
           valor_venal: r.valor_venal,
           base_imponible: r.base_imponible,
-          itp_importe: r.itp,
+          itp_importe: itpFinal,
           tasa_dgt: r.tasa_dgt,
-          total_impuestos: r.total_impuestos,
+          total_impuestos: totalFinal,
           calculo_json: r,
           calculado_at: new Date().toISOString()
         });
 
         Object.assign(exp, {
           valor_boe: payload.valor_boe, precio_contrato: payload.precio_contrato,
-          valor_venal: r.valor_venal, itp_importe: r.itp, tasa_dgt: r.tasa_dgt,
-          total_impuestos: r.total_impuestos, calculo_json: r
+          valor_venal: r.valor_venal, itp_importe: itpFinal, tasa_dgt: r.tasa_dgt,
+          total_impuestos: totalFinal, calculo_json: r
         });
 
-        toast('ITP calculado y guardado', 'ok');
+        pintarResultado();
+        toast(exento ? 'Cálculo guardado · expediente exento de ITP' : 'ITP calculado y guardado', 'ok');
       } catch (err) {
         toast(err.message || 'Error al calcular', 'err');
       } finally {
@@ -946,7 +1204,10 @@
               <dt>Estado</dt><dd><span class="badge badge-${h(exp.estado)}">${h(estadoInfo(exp.estado).label)}</span></dd>
               <dt>Cliente</dt><dd>${h(nombreCliente(exp.cliente))}</dd>
               <dt>Apertura</dt><dd>${fecha(exp.created_at)}</dd>
-              <dt>Cálculo fiscal</dt><dd>${tr.calculo === 'itp' ? 'ITP (automático)' : 'No aplica'}</dd>
+              <dt>Cálculo fiscal</dt><dd>${tr.calculo === 'itp'
+                ? (T.esExentoITP(exp) ? '<span class="badge badge-exento">ITP exento</span>' : 'ITP (automático)')
+                : 'No aplica'}</dd>
+              ${tr.calculo === 'itp' ? `<dt>Vendedor</dt><dd>${T.esVendedorEmpresa(exp) ? 'Empresa / concesionario' : 'Particular'}</dd>` : ''}
             </dl>
           </div>
           ${avisoTramite(tr)}
@@ -955,20 +1216,22 @@
       </div>`;
 
     const form = cont.querySelector('#form-datos');
+    activarVendedorEmpresa(form);
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const btn = cont.querySelector('#btn-guardar');
       btn.disabled = true;
       btn.innerHTML = '<span class="spinner"></span>';
       try {
-        const cambios = recoger(form, tr);
+        const cambios = recoger(form, tr, exp);
         cambios.notas = val(form, 'notas');
         await GTApi.actualizarExpediente(exp.id, cambios);
         Object.assign(exp, cambios);
         toast('Datos guardados', 'ok');
+        panelDatos(exp, tr, cont);              // refleja tipo de vendedor y exención
       } catch (err) {
         toast(err.message || 'No se pudieron guardar', 'err');
-      } finally {
         btn.disabled = false;
         btn.textContent = 'Guardar cambios';
       }
@@ -1093,6 +1356,12 @@
             : `<dt>Fecha de venta</dt><dd>${fecha(T.leer(exp, 'fecha_venta'))}</dd>`}
         </dl>
 
+        ${(esContrato && T.esVendedorEmpresa(exp)) ? `<div class="regul-note" style="margin-bottom:16px">
+          ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
+          <div>El vendedor es una <b>empresa</b>: la venta se documenta con <b>su factura</b>, no con un
+            contrato de compraventa entre particulares. Adjunta la factura en <b>Documentación</b>.</div>
+        </div>` : ''}
+
         ${faltan.length ? `<div class="regul-note" style="margin-bottom:16px">
           ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
           <div>El documento se generará con huecos en blanco. Faltan: <b>${h(faltan.join(', '))}</b>.</div>
@@ -1146,13 +1415,21 @@
         </select>
       </div>
 
+      <div class="kan-kpis" id="kan-kpis" aria-label="Expedientes por estado">
+        ${window.GT_ESTADOS.map(est => `
+          <div class="kan-kpi" style="--c:${est.color}">
+            <span class="kan-kpi-lbl">${h(est.label)}</span>
+            <b class="kan-kpi-num" data-kpi="${h(est.id)}">${expedientes.filter(e => e.estado === est.id).length}</b>
+          </div>`).join('')}
+      </div>
+
       <div class="kanban" id="kanban">
         ${window.GT_ESTADOS.map(est => {
           const items = expedientes.filter(e => e.estado === est.id);
           return `<div class="kan-col" data-estado="${h(est.id)}">
             <div class="kan-col-head">
               <span style="color:${est.color}">${h(est.label)}</span>
-              <span class="kan-count">${items.length}</span>
+              <span class="kan-count" style="--c:${est.color}">${items.length}</span>
             </div>
             <div class="kan-list" data-lista="${h(est.id)}">
               ${items.map(e => tarjetaKanban(e, tactil)).join('')}
@@ -1175,7 +1452,11 @@
       <div class="kan-card-meta">${h(e.matricula || '—')} · ${h(nombreCliente(e.cliente))}</div>
       <div class="kan-card-foot">
         <span class="badge badge-tramite" style="font-size:.62rem">${h(tr.corto)}</span>
-        ${tr.calculo === 'itp' && e.total_impuestos != null ? `<b>${eur(e.total_impuestos)}</b>` : `<span class="t-muted">${fecha(e.created_at)}</span>`}
+        ${tr.calculo === 'itp' && T.esExentoITP(e)
+          ? '<span class="badge badge-exento" style="font-size:.62rem">Exento</span>'
+          : (tr.calculo === 'itp' && e.total_impuestos != null
+              ? `<b>${eur(e.total_impuestos)}</b>`
+              : `<span class="t-muted">${fecha(e.created_at)}</span>`)}
       </div>
       ${tactil ? `<select class="tab" style="width:100%;margin-top:9px;padding:6px 9px;font-size:.74rem" data-mover="${h(e.id)}">
         ${window.GT_ESTADOS.map(s => `<option value="${h(s.id)}" ${s.id === e.estado ? 'selected' : ''}>${h(s.label)}</option>`).join('')}
@@ -1247,9 +1528,13 @@
     });
   }
 
+  /** Mantiene en sincronía el contador de cada columna y la tira de KPIs. */
   function recontar(kanban) {
     kanban.querySelectorAll('.kan-col').forEach(col => {
-      col.querySelector('.kan-count').textContent = col.querySelectorAll('.kan-card').length;
+      const n = col.querySelectorAll('.kan-card').length;
+      col.querySelector('.kan-count').textContent = n;
+      const kpi = document.querySelector(`.kan-kpi-num[data-kpi="${col.dataset.estado}"]`);
+      if (kpi) kpi.textContent = n;
     });
   }
 

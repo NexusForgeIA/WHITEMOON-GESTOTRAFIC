@@ -130,7 +130,17 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; }
 }
 .field textarea { resize: vertical; min-height: 74px; }
 .field select { cursor: pointer; }
-.field select option { background: #12121f; color: var(--text); }
+
+/* Un <select> nativo pinta su lista con los colores del sistema operativo:
+   sobre fondo oscuro las opciones no seleccionadas quedan grises. Se fuerza
+   el contraste en TODOS los desplegables nativos de la aplicación.
+   #f0f0f5 sobre #12121f = 16.3:1 (AA y AAA). */
+select option,
+select optgroup {
+  background: #12121f;
+  color: var(--text);
+}
+select option:checked { background: #241a4d; color: #fff; font-weight: 600; }
 
 .btn {
   display: inline-flex;
@@ -464,8 +474,35 @@ tbody tr.clickable:hover { background: rgba(124, 77, 255, .07); }
 }
 .kan-col-head span { font-size: .74rem; font-weight: 700; letter-spacing: .04em; }
 .kan-count {
-  background: rgba(255, 255, 255, .08); color: var(--muted);
-  border-radius: 99px; padding: 1px 9px; font-size: .68rem; font-weight: 700;
+  background: rgba(255, 255, 255, .08);       /* reserva si no hay color-mix */
+  border: 1px solid var(--border-2);
+  background: color-mix(in srgb, var(--c, #8888a0) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c, #8888a0) 34%, transparent);
+  color: var(--c, #b0b0c8);
+  border-radius: 99px; padding: 1px 10px;
+  font-size: .74rem; font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tira de KPIs: nº de expedientes en cada estado del tablero. */
+.kan-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.kan-kpi {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 11px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-left: 3px solid var(--c);
+  border-radius: var(--radius-sm);
+}
+.kan-kpi-lbl { font-size: .73rem; font-weight: 600; color: var(--muted); line-height: 1.35; }
+.kan-kpi-num {
+  font-size: 1.28rem; font-weight: 800; letter-spacing: -.02em;
+  color: var(--c); font-variant-numeric: tabular-nums;
 }
 .kan-card {
   background: linear-gradient(160deg, rgba(24, 24, 44, .92), rgba(14, 14, 26, .92));
@@ -589,7 +626,130 @@ tbody tr.clickable:hover { background: rgba(124, 77, 255, .07); }
   outline: none;
 }
 .filtro-bar select:focus { border-color: rgba(124, 77, 255, .6); }
-.filtro-bar select option { background: #12121f; }
+
+/* ---------------- Desplegable estilizado (gt-sel) ----------------
+   Sustituye al <select> nativo donde la lista desplegada tiene que ser
+   legible sí o sí: todas las opciones en var(--text) sobre #14141f
+   (contraste 15.4:1), seleccionada resaltada en violeta y hover visible. */
+.gt-sel { position: relative; }
+.gt-sel-btn {
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 8px 13px;
+  min-width: 194px;
+  border-radius: 99px;
+  border: 1px solid var(--border-2);
+  background: rgba(8, 8, 16, .72);
+  color: var(--text);
+  font-size: .8rem; font-weight: 600; cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.gt-sel-btn:hover { border-color: rgba(124, 77, 255, .5); background: rgba(124, 77, 255, .08); }
+.gt-sel-btn:focus-visible { outline: 2px solid var(--p2); outline-offset: 2px; }
+.gt-sel.open .gt-sel-btn { border-color: rgba(124, 77, 255, .62); background: rgba(124, 77, 255, .1); }
+.gt-sel-val { flex: 1; text-align: left; white-space: nowrap; }
+.gt-sel-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.gt-sel-chev { width: 15px; height: 15px; color: var(--muted); transition: transform .18s; }
+.gt-sel.open .gt-sel-chev { transform: rotate(180deg); }
+
+.gt-sel-list {
+  position: absolute; z-index: 60; top: calc(100% + 6px); left: 0;
+  min-width: 100%; margin: 0; padding: 6px;
+  list-style: none;
+  background: #14141f;
+  border: 1px solid rgba(124, 77, 255, .3);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+.gt-sel-opt {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  font-size: .81rem; font-weight: 600;
+  color: var(--text);                       /* todas las opciones legibles */
+  cursor: pointer;
+  white-space: nowrap;
+}
+.gt-sel-opt:hover,
+.gt-sel-opt:focus-visible { background: rgba(255, 255, 255, .1); color: #fff; outline: none; }
+.gt-sel-opt.sel { background: rgba(124, 77, 255, .24); color: #fff; }
+.gt-sel-opt-txt { flex: 1; }
+.gt-sel-check { width: 15px; height: 15px; color: var(--p2); opacity: 0; flex-shrink: 0; }
+.gt-sel-opt.sel .gt-sel-check { opacity: 1; }
+
+/* ---------------- Toggle (exención de ITP) ---------------- */
+.gt-toggle {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 13px 15px;
+  margin: 4px 0 14px;
+  background: rgba(8, 8, 16, .5);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color .16s, background .16s;
+}
+.gt-toggle:hover { border-color: rgba(124, 77, 255, .38); }
+.gt-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.gt-toggle-track {
+  position: relative; flex-shrink: 0;
+  width: 40px; height: 22px; margin-top: 2px;
+  background: rgba(255, 255, 255, .12);
+  border-radius: 99px;
+  transition: background .18s;
+}
+.gt-toggle-knob {
+  position: absolute; top: 3px; left: 3px;
+  width: 16px; height: 16px;
+  background: #fff; border-radius: 50%;
+  transition: transform .18s;
+}
+.gt-toggle input:checked + .gt-toggle-track { background: var(--g); }
+.gt-toggle input:checked + .gt-toggle-track .gt-toggle-knob { transform: translateX(18px); }
+.gt-toggle input:focus-visible + .gt-toggle-track { outline: 2px solid var(--p2); outline-offset: 2px; }
+.gt-toggle-txt > b { display: block; font-size: .82rem; }
+.gt-toggle-txt small { display: block; font-size: .73rem; color: var(--muted); line-height: 1.6; margin-top: 3px; }
+.gt-toggle-txt small b { color: var(--text); }
+.gt-toggle input:checked ~ .gt-toggle-txt > b { color: var(--g); }
+
+/* ---------------- Vendedor empresa · exención ---------------- */
+.empresa-note {
+  display: flex; gap: 11px;
+  padding: 12px 15px;
+  margin-bottom: 14px;
+  background: rgba(0, 212, 170, .07);
+  border: 1px solid rgba(0, 212, 170, .3);
+  border-radius: var(--radius-sm);
+  font-size: .78rem;
+  color: #9fe6d4;
+  line-height: 1.62;
+}
+.empresa-note svg { width: 17px; height: 17px; flex-shrink: 0; margin-top: 2px; color: var(--g); }
+.empresa-note b { color: #d6fff4; }
+
+/* Campo que rellena la aplicación: se lee, no se escribe. */
+.field.is-auto input {
+  background: rgba(0, 212, 170, .07);
+  border-color: rgba(0, 212, 170, .26);
+  color: var(--text);
+  cursor: default;
+}
+.field.is-auto label::after {
+  content: ' · volcado';
+  color: var(--g);
+  font-weight: 700;
+}
+.field-hint { display: block; margin-top: 6px; font-size: .73rem; color: var(--muted); line-height: 1.55; }
+
+.badge-exento { background: rgba(0, 212, 170, .15); color: var(--g); }
+.itp-exento { color: var(--g); }
+.itp-cell.exento { border-color: rgba(0, 212, 170, .4); background: rgba(0, 212, 170, .07); }
+.itp-exento-nota {
+  display: block;
+  margin: -2px 0 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-2);
+  color: #9fe6d4;
+}
+.itp-exento-nota b { color: #d6fff4; }
 
 /* ---------------- Utilidades ---------------- */
 .empty { text-align: center; padding: 46px 22px; color: var(--muted); }
