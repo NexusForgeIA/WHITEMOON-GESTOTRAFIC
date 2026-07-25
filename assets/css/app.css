@@ -740,6 +740,8 @@ tbody tr.clickable:hover { background: rgba(124, 77, 255, .07); }
 .field-hint { display: block; margin-top: 6px; font-size: .73rem; color: var(--muted); line-height: 1.55; }
 
 .badge-exento { background: rgba(0, 212, 170, .15); color: var(--g); }
+.badge-admin  { background: rgba(124, 77, 255, .17); color: var(--p2); }
+.badge-gestor { background: rgba(92, 170, 255, .15); color: #7cb8ff; }
 .itp-exento { color: var(--g); }
 .itp-cell.exento { border-color: rgba(0, 212, 170, .4); background: rgba(0, 212, 170, .07); }
 .itp-exento-nota {

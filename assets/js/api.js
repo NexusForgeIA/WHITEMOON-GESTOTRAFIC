@@ -1,13 +1,38 @@
 /* ============================================================
    GestoTrafic · Capa de datos (Supabase)
    Todas las operaciones van contra tablas namespaced gestotrafic_*.
+
+   El cliente se autentica con la sesión que emitió gestotrafic-auth.
+   Ese token es lo que aplica el RLS: un gestor solo recibe SUS
+   expedientes y un admin los recibe todos, sin que las consultas de
+   aquí tengan que filtrar nada. El filtrado no es cosmético: aunque
+   se manipulase este fichero, el servidor no devolvería más filas.
    ============================================================ */
 (function (global) {
   'use strict';
 
   var C = global.GT_CONFIG;
   var sb = global.supabase.createClient(C.SUPABASE_URL, C.SUPABASE_ANON_KEY, {
-    auth: { persistSession: false }
+    auth: { persistSession: false, autoRefreshToken: true, detectSessionInUrl: false }
+  });
+
+  /* Restaura la sesión en el cliente. Hay que esperar a que termine antes
+     de la primera consulta: si no, saldría con el rol anon y el RLS la
+     dejaría a cero filas. */
+  var tokens = global.GTAuth ? global.GTAuth.getTokens() : null;
+  var listo = tokens
+    ? sb.auth.setSession({
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token
+      }).then(function (r) {
+        if (r.error) throw new Error('Sesión caducada');
+        return r;
+      })
+    : Promise.resolve(null);
+
+  // supabase-js renueva el token solo; lo guardamos para no perderlo al recargar.
+  sb.auth.onAuthStateChange(function (evento, session) {
+    if (session && global.GTAuth) global.GTAuth.actualizarTokens(session);
   });
 
   function unwrap(res) {
@@ -22,7 +47,9 @@
   }
 
   async function obtenerCliente(id) {
-    return unwrap(await sb.from(C.TABLA_CLIENTES).select('*').eq('id', id).single());
+    var c = unwrap(await sb.from(C.TABLA_CLIENTES).select('*').eq('id', id).maybeSingle());
+    if (!c) throw new Error('Esta ficha de cliente ya no existe.');
+    return c;
   }
 
   async function crearCliente(datos) {
@@ -40,7 +67,8 @@
 
   /* ---------------- Expedientes ---------------- */
 
-  var SELECT_EXP = '*, cliente:' + C.TABLA_CLIENTES + '(id, nombre, apellidos, razon_social, tipo, nif)';
+  var SELECT_EXP = '*, cliente:' + C.TABLA_CLIENTES + '(id, nombre, apellidos, razon_social, tipo, nif)'
+                 + ', gestor:' + C.TABLA_USUARIOS + '(id, nombre, usuario)';
 
   async function listarExpedientes() {
     return unwrap(await sb.from(C.TABLA_EXPEDIENTES).select(SELECT_EXP).order('created_at', { ascending: false }));
@@ -51,12 +79,27 @@
       .eq('cliente_id', clienteId).order('created_at', { ascending: false }));
   }
 
+  /** Si el expediente es de otro gestor, el RLS no lo devuelve. `maybeSingle`
+      lo distingue de un error real y evita soltar la jerga de PostgREST. */
   async function obtenerExpediente(id) {
-    return unwrap(await sb.from(C.TABLA_EXPEDIENTES).select(SELECT_EXP).eq('id', id).single());
+    var exp = unwrap(await sb.from(C.TABLA_EXPEDIENTES).select(SELECT_EXP).eq('id', id).maybeSingle());
+    if (!exp) throw new Error('Este expediente no existe o no está asignado a tu usuario.');
+    return exp;
   }
 
+  /** El expediente es de quien lo crea. El RLS solo admite el propio id
+      (o cualquiera, si es admin), así que esto no es decorativo. */
   async function crearExpediente(datos) {
+    var s = global.GTAuth.getSession();
+    if (s && !datos.gestor_id) datos.gestor_id = s.id;
     return unwrap(await sb.from(C.TABLA_EXPEDIENTES).insert(datos).select().single());
+  }
+
+  /** Reasignar a otro gestor. El RLS solo se lo permite al admin. */
+  async function reasignarExpediente(id, gestorId) {
+    return unwrap(await sb.from(C.TABLA_EXPEDIENTES)
+      .update({ gestor_id: gestorId, updated_at: new Date().toISOString() })
+      .eq('id', id).select().single());
   }
 
   async function actualizarExpediente(id, datos) {
@@ -116,9 +159,22 @@
     return unwrap(await sb.from(C.TABLA_DOCUMENTOS).delete().eq('id', doc.id));
   }
 
-  function urlDocumento(path) {
+  /** El bucket es privado: cada enlace se firma y caduca. Un gestor solo puede
+      firmar rutas de sus propios expedientes (política de storage.objects). */
+  async function urlDocumento(path) {
     if (!path) return null;
-    return sb.storage.from(C.BUCKET_DOCS).getPublicUrl(path).data.publicUrl;
+    var r = await sb.storage.from(C.BUCKET_DOCS).createSignedUrl(path, 3600);
+    if (r.error) return null;
+    return r.data.signedUrl;
+  }
+
+  /** Firma en bloque los documentos de un expediente: { id: url }. */
+  async function urlsDocumentos(docs) {
+    var mapa = {};
+    await Promise.all((docs || []).map(async function (d) {
+      mapa[d.id] = await urlDocumento(d.storage_path);
+    }));
+    return mapa;
   }
 
   /* ---------------- Cálculo ITP ---------------- */
@@ -140,6 +196,56 @@
     var data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || 'No se pudo calcular el ITP');
     return data;
+  }
+
+  /* ---------------- Usuarios (gestores) ---------------- */
+
+  /** El RLS decide qué se ve: el admin todos, un gestor solo su ficha.
+      `password_hash` no está en la lista y además no tiene privilegio
+      de lectura para `authenticated`. */
+  async function listarUsuarios() {
+    return unwrap(await sb.from(C.TABLA_USUARIOS)
+      .select('id, nombre, usuario, rol, activo, created_at')
+      .order('rol', { ascending: true })
+      .order('nombre', { ascending: true }));
+  }
+
+  /** Llama a la Edge Function con el token del admin: ella vuelve a
+      comprobar el rol en el servidor antes de hashear y dar de alta. */
+  async function llamarAuth(cuerpo) {
+    var res = await fetch(C.SUPABASE_URL + '/functions/v1/' + C.FN_AUTH, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': C.SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + (global.GTAuth.getToken() || C.SUPABASE_ANON_KEY)
+      },
+      body: JSON.stringify(cuerpo)
+    });
+    var data = await res.json().catch(function () { return {}; });
+    if (!res.ok || data.error) throw new Error(data.error || 'No se pudo completar la operación');
+    return data;
+  }
+
+  async function crearGestor(datos) {
+    return (await llamarAuth({
+      accion: 'crear',
+      nombre: datos.nombre,
+      usuario: datos.usuario,
+      password: datos.password,
+      rol: datos.rol || 'gestor'
+    })).usuario;
+  }
+
+  async function cambiarClave(usuarioId, password) {
+    return llamarAuth({ accion: 'clave', usuario: usuarioId, password: password });
+  }
+
+  /** Activar o desactivar. Solo el admin pasa el RLS de update. */
+  async function cambiarActivo(usuarioId, activo) {
+    return unwrap(await sb.from(C.TABLA_USUARIOS)
+      .update({ activo: activo, updated_at: new Date().toISOString() })
+      .eq('id', usuarioId).select('id, nombre, usuario, rol, activo').single());
   }
 
   /* ---------------- KPIs ---------------- */
@@ -175,6 +281,7 @@
 
   global.GTApi = {
     sb: sb,
+    listo: listo,
     listarClientes: listarClientes,
     obtenerCliente: obtenerCliente,
     crearCliente: crearCliente,
@@ -185,11 +292,17 @@
     obtenerExpediente: obtenerExpediente,
     crearExpediente: crearExpediente,
     actualizarExpediente: actualizarExpediente,
+    reasignarExpediente: reasignarExpediente,
     borrarExpediente: borrarExpediente,
+    listarUsuarios: listarUsuarios,
+    crearGestor: crearGestor,
+    cambiarClave: cambiarClave,
+    cambiarActivo: cambiarActivo,
     listarDocumentos: listarDocumentos,
     subirDocumento: subirDocumento,
     borrarDocumento: borrarDocumento,
     urlDocumento: urlDocumento,
+    urlsDocumentos: urlsDocumentos,
     calcularITP: calcularITP,
     kpis: kpis
   };

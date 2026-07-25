@@ -21,7 +21,8 @@ de expediente) y en el pie del contrato generado.
 
 | # | Módulo | Estado |
 |---|--------|--------|
-| 1 | Login multirol (gestor / admin) | ✅ |
+| 0 | Multiusuario: alta de gestores y aislamiento por RLS | ✅ |
+| 1 | Login real contra `gestotrafic_usuarios` (bcrypt) | ✅ |
 | 2 | Dashboard con KPIs | ✅ |
 | 3 | Fichas de clientes (particular / empresa) + historial | ✅ |
 | 4 | Expedientes de transferencia + Kanban drag & drop | ✅ |
@@ -29,19 +30,23 @@ de expediente) y en el pie del contrato generado.
 | 6 | Captura de documentación + checklist | ✅ |
 | 7 | Contrato de compraventa pre-rellenado | ✅ |
 
-### 1 · Login multirol
+### 1 · Login multiusuario
 
 Credenciales de demostración:
 
-| Usuario | Contraseña | Rol | Ve además |
+| Usuario | Contraseña | Rol | Ve |
 |---------|-----------|-----|-----------|
-| `gestor` | `demo` | Gestor | — |
-| `admin`  | `demo` | Administrador | Botones de eliminar cliente y expediente |
+| `admin`  | `demo` | Administrador | Todos los expedientes · panel de Gestores |
+| `gestor` | `demo` | Gestor (Laura Ortega) | Solo sus expedientes |
+| `marcos` | `demo` | Gestor (Marcos Delgado) | Solo sus expedientes |
 
-> ⚠️ **No es autenticación real.** Se resuelve en el navegador
-> (`assets/js/auth.js`) para poder enseñar los dos roles. En un despliegue de
-> producción se sustituye por Supabase Auth con contraseñas hasheadas en
-> servidor. La sesión vive en `sessionStorage` y se pierde al cerrar la pestaña.
+**La autenticación es real.** Las credenciales se verifican en la Edge Function
+`gestotrafic-auth` contra el hash **bcrypt** de `gestotrafic_usuarios`, que
+devuelve una sesión de Supabase firmada. El aislamiento entre gestores lo impone
+el **RLS** de la base de datos, no la interfaz.
+
+Detalle completo, incluida la matriz de lo que está cerrado y por qué, en
+[`USUARIOS.md`](USUARIOS.md).
 
 ### 2 · Dashboard
 
@@ -170,22 +175,29 @@ huecos en blanco y se avisa en pantalla de cuáles son.
 ## Arquitectura
 
 ```
-index.html              Login
-app.html                Panel (SPA con router por hash)
-assets/css/app.css      Sistema de diseño WhiteMoon
-assets/js/auth.js       Sesión de demo y roles
-assets/js/config.js     Configuración y catálogos (CCAA, estados, checklist)
-assets/js/api.js        Capa de datos Supabase
-assets/js/contrato.js   Generador del contrato
-assets/js/app.js        Router y vistas
+index.html                          Login
+app.html                            Panel (SPA con router por hash)
+assets/css/app.css                  Sistema de diseño WhiteMoon
+assets/js/config.js                 Configuración y catálogos (CCAA, estados)
+assets/js/auth.js                   Sesión (login contra gestotrafic-auth)
+assets/js/tramites.js               Catálogo de trámites
+assets/js/api.js                    Capa de datos Supabase
+assets/js/contrato.js               Generador del contrato
+assets/js/app.js                    Router y vistas
+supabase/functions/gestotrafic-auth Login y alta de gestores (bcrypt)
 ```
+
+El orden de carga importa: `config.js` → `auth.js` → `api.js`. `api.js` necesita
+la sesión que guarda `auth.js` para autenticar el cliente de Supabase **antes**
+de la primera consulta; si saliera como `anon`, el RLS la devolvería vacía.
 
 Sin frameworks ni build: HTML, CSS y JavaScript puro sobre GitHub Pages.
 
 ### Rutas
 
 `#/dashboard` · `#/clientes` · `#/clientes/:id` · `#/expedientes` ·
-`#/expedientes/nuevo` · `#/expedientes/:id` · `#/kanban`
+`#/expedientes/nuevo` · `#/expedientes/:id` · `#/kanban` ·
+`#/gestores` (solo admin)
 
 ---
 
@@ -213,17 +225,38 @@ Garantías:
 
 ### RLS
 
-Las tres tablas tienen RLS activado con una política permisiva para `anon` y
-`authenticated`, acotada a las propias tablas de la demo. Es deliberado: la demo
-es pública y no contiene datos reales de clientes. Para un despliegue real se
-sustituye por políticas por `tenant_id` con Supabase Auth.
+Con el multiusuario, el acceso anónimo está **cerrado**. Las políticas exigen
+sesión y aplican el rol:
+
+- `gestotrafic_expedientes` · el gestor solo ve los suyos (`gestor_id =
+  auth.uid()`), el admin todos
+- `gestotrafic_documentos` · heredan la visibilidad de su expediente
+- `gestotrafic_usuarios` · cada uno ve su ficha, el admin todas; el
+  `password_hash` no tiene privilegio de lectura para nadie
+- `gestotrafic_clientes` · agenda compartida entre gestores, pero solo con sesión
+- Bucket `gestotrafic-docs` · **privado**, con enlaces firmados que caducan y
+  política de propiedad por expediente
+
+Ver [`USUARIOS.md`](USUARIOS.md).
 
 ---
 
 ## Datos de demostración
 
-La demo se entrega con 4 clientes y 5 expedientes repartidos por los distintos
-estados del Kanban, todos con el ITP calculado con el motor real.
+La demo se entrega poblada para que se vea funcionando de entrada:
+
+- **6 clientes** · 4 particulares y 2 empresas (concesionarios), que son las que
+  alimentan el selector de *vendedor empresa*
+- **12 expedientes** repartidos por los 7 tipos de trámite y por los 5 estados
+  del Kanban, y **entre los gestores**
+- **2 transferencias con vendedor empresa**, con factura y la **exención de ITP**
+  marcada, junto a una transferencia entre particulares con el ITP calculado
+- **23 documentos** reales en el bucket, incluido el certificado del CAT de la
+  baja definitiva por destrucción
+
+Todos los datos son **ficticios**: ni personas ni DNI reales. Los NIF y CIF
+respetan el formato pero están inventados. Los importes de ITP salen del motor
+real `gestotrafic-itp`.
 
 ---
 
