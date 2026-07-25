@@ -55,6 +55,10 @@ Alta de **particular** (nombre, apellidos, NIF) o **empresa** (razón social, CI
 con contacto, dirección y notas. La ficha muestra el historial completo de
 trámites del cliente.
 
+Los clientes de tipo **empresa** son además el origen del vendedor cuando una
+transferencia la vende un concesionario: sus datos se vuelcan al expediente en
+lugar de reescribirse a mano.
+
 ### 4 · Expedientes y Kanban
 
 Trámite estrella: **transferencia de vehículo**. Datos del vehículo (marca,
@@ -73,6 +77,18 @@ Estados en tablero Kanban con drag & drop nativo HTML5:
 ```
 nuevo → documentación pendiente → en tramitación → presentado → completado
 ```
+
+El tablero muestra el **nº de expedientes por estado** en dos sitios: una tira
+de KPIs sobre el tablero y el contador de cada columna, ambos con el color del
+estado. Los dos se recalculan al soltar una tarjeta.
+
+El **selector de estado** de la ficha de expediente no es un `<select>` nativo:
+un desplegable nativo pinta su lista con los colores del sistema operativo y
+sobre fondo oscuro las opciones no seleccionadas quedan ilegibles. Se sustituyó
+por un desplegable propio (`gt-sel`) navegable con teclado, con **16,1:1** de
+contraste en las opciones normales y **18,3:1** en la seleccionada (AAA). En el
+resto de desplegables nativos de la aplicación el contraste de `option` se
+fuerza por CSS.
 
 El movimiento es optimista: la tarjeta se coloca al soltar y se revierte si la
 escritura en Supabase falla. En dispositivos táctiles (`pointer: coarse`), donde
@@ -123,10 +139,19 @@ Caso verificado en la demo:
 > Precio de contrato 8.500 € > valor fiscal → **base imponible 8.500 €**.
 > Madrid 4% → **ITP 340,00 €** + **tasa DGT 55,70 €** = **395,70 €**.
 
+**Exención por factura de empresa.** Si el vendedor es una empresa que emite
+factura sujeta a IVA, la transmisión suele quedar exenta de ITP. GestoTrafic
+**no lo decide solo**: el gestor lo confirma con un toggle. Al marcarlo el ITP
+queda en 0 y el total se reduce a la tasa DGT (mismo caso: 395,70 € → 55,70 €).
+`calculo_json` conserva íntegro el resultado del motor, así que la exención es
+auditable y reversible. Detalle en [`TRAMITES.md`](TRAMITES.md).
+
 ### 6 · Documentación
 
-Checklist por trámite con 5 documentos obligatorios (DNI comprador, DNI vendedor,
-permiso de circulación, ficha técnica, contrato) y 2 opcionales (ITV, otros).
+Checklist por trámite con 5 documentos obligatorios y 2 opcionales (ITV, otros).
+En la transferencia el checklist **se adapta al vendedor**: con un particular
+pide *DNI del vendedor* y *Contrato de compraventa*; con una empresa pide *CIF
+de la empresa vendedora* y **Factura de venta**.
 Cada documento tiene estado *pendiente* / *recibido*, barra de progreso, y se
 sube (foto o escaneo, JPG/PNG/PDF, máx. 10 MB) al bucket aislado
 `gestotrafic-docs` de Supabase Storage. Subir un documento del mismo tipo
