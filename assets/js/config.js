@@ -14,10 +14,14 @@ window.GT_CONFIG = {
   TABLA_CLIENTES: 'gestotrafic_clientes',
   TABLA_EXPEDIENTES: 'gestotrafic_expedientes',
   TABLA_DOCUMENTOS: 'gestotrafic_documentos',
+  TABLA_USUARIOS: 'gestotrafic_usuarios',
   BUCKET_DOCS: 'gestotrafic-docs',
 
   // Motor de cálculo ITP (BOE 2026 · Orden HAC/1501/2025)
   FN_ITP: 'gestotrafic-itp',
+
+  // Login y alta de gestores (verifica bcrypt y emite la sesión)
+  FN_AUTH: 'gestotrafic-auth',
 
   // Datos de la gestoría que aparecen en el contrato generado
   GESTORIA: {

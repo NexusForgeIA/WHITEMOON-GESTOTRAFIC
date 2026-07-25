@@ -247,6 +247,24 @@
     return clientes;
   }
 
+  /* Gestores. Solo el admin puede listarlos (lo impide el RLS), y solo él
+     necesita la lista: es quien reasigna expedientes. */
+  let gestores = [];
+
+  async function cargarGestores() {
+    if (!GTAuth.isAdmin()) { gestores = []; return gestores; }
+    gestores = await GTApi.listarUsuarios();
+    return gestores;
+  }
+
+  const nombreGestor = (e) =>
+    (e && e.gestor && e.gestor.nombre) ? e.gestor.nombre : '— sin asignar —';
+
+  /** Qué alcance tiene lo que se está viendo. Lo decide el RLS, no la interfaz. */
+  const ambito = () => GTAuth.isAdmin()
+    ? 'Todos los expedientes de la gestoría'
+    : 'Tus expedientes asignados';
+
   function campoHTML(c, valor) {
     const id = 'f-' + c.n;
     const req = c.req ? 'required' : '';
@@ -408,7 +426,7 @@
       <div class="page-head">
         <div>
           <h1>Hola, ${h(session.nombre.split(' ')[0])} 👋</h1>
-          <p>Resumen de actividad de la gestoría</p>
+          <p>${ambito()}</p>
         </div>
         <button class="btn" data-nuevo-exp>+ Nuevo expediente</button>
       </div>
@@ -687,19 +705,21 @@
 
   async function vistaExpedientes() {
     loading('Cargando expedientes…');
-    const todos = await GTApi.listarExpedientes();
+    const [todos] = await Promise.all([GTApi.listarExpedientes(), cargarGestores()]);
+    const verGestor = GTAuth.isAdmin();
 
     function pintar() {
       const expedientes = filtroTipo === 'todos' ? todos : todos.filter(e => e.tipo_tramite === filtroTipo);
       const cont = view.querySelector('#lista-exp');
 
       cont.innerHTML = expedientes.length ? `<div class="table-wrap"><table>
-        <thead><tr><th>Referencia</th><th>Trámite</th><th>Cliente</th><th>Vehículo</th><th>Matrícula</th><th>Estado</th><th>ITP</th></tr></thead>
+        <thead><tr><th>Referencia</th><th>Trámite</th><th>Cliente</th>${verGestor ? '<th>Gestor</th>' : ''}<th>Vehículo</th><th>Matrícula</th><th>Estado</th><th>ITP</th></tr></thead>
         <tbody>${expedientes.map(e => `
           <tr class="clickable" data-exp="${h(e.id)}">
             <td class="t-mono">${h(e.referencia)}</td>
             <td><span class="badge badge-tramite">${h(T.tramite(e.tipo_tramite).corto)}</span></td>
             <td>${h(nombreCliente(e.cliente))}</td>
+            ${verGestor ? `<td class="t-muted">${h(nombreGestor(e))}</td>` : ''}
             <td>${h([e.marca, e.modelo].filter(Boolean).join(' ') || '—')}</td>
             <td class="t-mono">${h(e.matricula || '—')}</td>
             <td><span class="badge badge-${h(e.estado)}">${h(estadoInfo(e.estado).label)}</span></td>
@@ -881,7 +901,8 @@
     const [exp, docs] = await Promise.all([
       GTApi.obtenerExpediente(id),
       GTApi.listarDocumentos(id),
-      cargarClientes()                          // alimenta el selector de empresa vendedora
+      cargarClientes(),                         // alimenta el selector de empresa vendedora
+      cargarGestores()                          // solo devuelve algo si eres admin
     ]);
     const tr = T.tramite(exp.tipo_tramite);
 
@@ -1203,6 +1224,7 @@
               <dt>Trámite</dt><dd>${h(tr.nombre)}</dd>
               <dt>Estado</dt><dd><span class="badge badge-${h(exp.estado)}">${h(estadoInfo(exp.estado).label)}</span></dd>
               <dt>Cliente</dt><dd>${h(nombreCliente(exp.cliente))}</dd>
+              <dt>Gestor</dt><dd>${h(nombreGestor(exp))}</dd>
               <dt>Apertura</dt><dd>${fecha(exp.created_at)}</dd>
               <dt>Cálculo fiscal</dt><dd>${tr.calculo === 'itp'
                 ? (T.esExentoITP(exp) ? '<span class="badge badge-exento">ITP exento</span>' : 'ITP (automático)')
@@ -1210,6 +1232,20 @@
               ${tr.calculo === 'itp' ? `<dt>Vendedor</dt><dd>${T.esVendedorEmpresa(exp) ? 'Empresa / concesionario' : 'Particular'}</dd>` : ''}
             </dl>
           </div>
+          ${GTAuth.isAdmin() ? `<div class="card">
+            <div class="card-t">Reasignar expediente</div>
+            <p class="t-muted" style="font-size:.79rem;margin:0 0 12px">
+              Cambia el gestor responsable. Solo un administrador puede hacerlo:
+              el RLS se lo niega a un gestor.
+            </p>
+            <div class="field" style="margin:0">
+              <label for="f-gestor">Gestor asignado</label>
+              <select id="f-gestor">
+                <option value="">— sin asignar —</option>
+                ${gestores.map(g => `<option value="${h(g.id)}" ${exp.gestor_id === g.id ? 'selected' : ''}>${h(g.nombre)} · ${h(g.usuario)}${g.activo ? '' : ' (desactivado)'}</option>`).join('')}
+              </select>
+            </div>
+          </div>` : ''}
           ${avisoTramite(tr)}
           ${avisoRegulado()}
         </div>
@@ -1217,6 +1253,24 @@
 
     const form = cont.querySelector('#form-datos');
     activarVendedorEmpresa(form);
+
+    const selGestor = cont.querySelector('#f-gestor');
+    if (selGestor) selGestor.addEventListener('change', async () => {
+      const previo = exp.gestor_id;
+      selGestor.disabled = true;
+      try {
+        await GTApi.reasignarExpediente(exp.id, selGestor.value || null);
+        exp.gestor_id = selGestor.value || null;
+        exp.gestor = gestores.find(g => g.id === exp.gestor_id) || null;
+        toast('Expediente reasignado a ' + (exp.gestor ? exp.gestor.nombre : 'nadie'), 'ok');
+        panelDatos(exp, tr, cont);
+      } catch (err) {
+        selGestor.value = previo || '';
+        toast(err.message || 'No se pudo reasignar', 'err');
+      } finally {
+        selGestor.disabled = false;
+      }
+    });
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -1239,9 +1293,12 @@
   }
 
   /* ---------- Panel: Documentación ---------- */
-  function panelDocs(exp, tr, docs, cont) {
+  async function panelDocs(exp, tr, docs, cont) {
     const porTipo = {};
     docs.forEach(d => { porTipo[d.tipo] = d; });
+
+    // El bucket es privado: los enlaces se firman al pintar y caducan en 1 h.
+    const enlaces = await GTApi.urlsDocumentos(docs);
 
     const aplicables = T.docsDe(tr, exp);
     const obligatorios = aplicables.filter(d => d.obligatorio);
@@ -1271,7 +1328,7 @@
             </div>
             <div class="doc-actions">
               <span class="badge badge-${doc ? 'recibido' : 'pendiente'}">${doc ? 'Recibido' : 'Pendiente'}</span>
-              ${doc ? `<a class="btn btn-ghost btn-sm" href="${h(GTApi.urlDocumento(doc.storage_path))}" target="_blank" rel="noopener">Ver</a>
+              ${doc ? `${enlaces[doc.id] ? `<a class="btn btn-ghost btn-sm" href="${h(enlaces[doc.id])}" target="_blank" rel="noopener">Ver</a>` : ''}
                        <button class="btn btn-danger btn-sm" data-del="${h(doc.id)}">Quitar</button>`
                     : `<label class="file-label">Subir<input type="file" accept="image/*,application/pdf" data-tipo="${h(def.tipo)}"></label>`}
             </div>
@@ -1280,7 +1337,9 @@
 
         <p class="t-muted" style="font-size:.76rem;margin:14px 0 0">
           Formatos admitidos: foto o escaneo (JPG, PNG) y PDF · máximo 10 MB por archivo.
-          Se guardan en Supabase Storage, en el bucket aislado <span class="t-mono">gestotrafic-docs</span>.
+          Se guardan en el bucket <b>privado</b> <span class="t-mono">gestotrafic-docs</span>: cada enlace
+          se firma al abrirlo y caduca en 1 hora. Solo el gestor del expediente (o un administrador)
+          puede firmarlo.
         </p>
       </div>`;
 
@@ -1389,6 +1448,125 @@
   }
 
   /* ============================================================
+     VISTA · GESTORES (solo admin)
+     ============================================================ */
+  async function vistaGestores() {
+    if (!GTAuth.isAdmin()) { location.hash = '#/dashboard'; return; }
+
+    loading('Cargando gestores…');
+    const [usuarios, expedientes] = await Promise.all([
+      GTApi.listarUsuarios(),
+      GTApi.listarExpedientes()
+    ]);
+
+    const carga = {};
+    expedientes.forEach(e => { if (e.gestor_id) carga[e.gestor_id] = (carga[e.gestor_id] || 0) + 1; });
+
+    view.innerHTML = `
+      ${cabecera()}
+      <div class="page-head">
+        <div>
+          <h1>Gestores</h1>
+          <p>${usuarios.length} usuario${usuarios.length === 1 ? '' : 's'} · cada gestor solo ve sus expedientes</p>
+        </div>
+        <button class="btn" id="btn-nuevo-gestor">+ Nuevo gestor</button>
+      </div>
+
+      <div class="table-wrap"><table>
+        <thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Expedientes</th><th>Estado</th><th></th></tr></thead>
+        <tbody>${usuarios.map(u => `
+          <tr>
+            <td><b>${h(u.nombre)}</b></td>
+            <td class="t-mono">${h(u.usuario)}</td>
+            <td><span class="badge badge-${u.rol === 'admin' ? 'admin' : 'gestor'}">${u.rol === 'admin' ? 'Administrador' : 'Gestor'}</span></td>
+            <td class="t-num">${carga[u.id] || 0}</td>
+            <td><span class="badge badge-${u.activo ? 'recibido' : 'pendiente'}">${u.activo ? 'Activo' : 'Desactivado'}</span></td>
+            <td>
+              <div class="row-actions" style="justify-content:flex-end">
+                <button class="btn btn-ghost btn-sm" data-clave="${h(u.id)}" data-nombre="${h(u.nombre)}">Contraseña</button>
+                ${u.id === session.id
+                  ? '<span class="t-muted" style="font-size:.74rem;padding:0 6px">tu cuenta</span>'
+                  : `<button class="btn ${u.activo ? 'btn-danger' : ''} btn-sm" data-activo="${h(u.id)}" data-valor="${u.activo ? '0' : '1'}">${u.activo ? 'Desactivar' : 'Activar'}</button>`}
+              </div>
+            </td>
+          </tr>`).join('')}</tbody></table></div>
+
+      <div class="regul-note" style="margin-top:18px">
+        ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
+        <div>El aislamiento entre gestores lo impone <b>el servidor</b> (RLS sobre
+          <span class="t-mono">gestotrafic_expedientes</span>), no la interfaz: un gestor no puede
+          leer ni modificar expedientes de otro aunque manipule el navegador. Las contraseñas se
+          guardan con <b>bcrypt</b> y nunca salen de la base de datos.</div>
+      </div>
+      ${footer()}`;
+
+    view.querySelector('#btn-nuevo-gestor').addEventListener('click', modalNuevoGestor);
+
+    view.querySelectorAll('[data-activo]').forEach(b => b.addEventListener('click', async () => {
+      b.disabled = true;
+      try {
+        await GTApi.cambiarActivo(b.dataset.activo, b.dataset.valor === '1');
+        toast(b.dataset.valor === '1' ? 'Gestor activado' : 'Gestor desactivado', 'ok');
+        vistaGestores();
+      } catch (err) { toast(err.message, 'err'); b.disabled = false; }
+    }));
+
+    view.querySelectorAll('[data-clave]').forEach(b => b.addEventListener('click', () => {
+      modal({
+        titulo: 'Cambiar contraseña',
+        cuerpo: `<p class="t-muted" style="margin-top:0;font-size:.85rem">Nueva contraseña para <b>${h(b.dataset.nombre)}</b>.</p>
+          <div class="field"><label>Contraseña *</label><input name="password" type="password" placeholder="Mínimo 4 caracteres" required></div>`,
+        okTexto: 'Cambiar',
+        onOk: async (root) => {
+          const pw = val(root, 'password');
+          if (!pw || pw.length < 4) { toast('La contraseña es demasiado corta', 'err'); return false; }
+          await GTApi.cambiarClave(b.dataset.clave, pw);
+          toast('Contraseña actualizada', 'ok');
+        }
+      });
+    }));
+  }
+
+  function modalNuevoGestor() {
+    modal({
+      titulo: 'Nuevo gestor',
+      cuerpo: `
+        <div class="form-grid">
+          <div class="field"><label>Nombre y apellidos *</label><input name="nombre" placeholder="Elena Ruiz Vidal" required></div>
+          <div class="field"><label>Usuario de acceso *</label><input name="usuario" placeholder="elena" required></div>
+        </div>
+        <div class="form-grid">
+          <div class="field"><label>Contraseña *</label><input name="password" type="password" placeholder="Mínimo 4 caracteres" required></div>
+          <div class="field">
+            <label for="f-rol-gestor">Rol</label>
+            <select name="rol" id="f-rol-gestor">
+              <option value="gestor">Gestor · solo sus expedientes</option>
+              <option value="admin">Administrador · ve todos</option>
+            </select>
+          </div>
+        </div>
+        <div class="empresa-note" style="margin:14px 0 0">
+          ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
+          <div>La contraseña se cifra con <b>bcrypt</b> en el servidor. Ni se guarda en claro
+            ni vuelve nunca al navegador.</div>
+        </div>`,
+      okTexto: 'Crear gestor',
+      onOk: async (root) => {
+        const nombre = val(root, 'nombre');
+        const usuario = val(root, 'usuario');
+        const password = val(root, 'password');
+        if (!nombre) { toast('El nombre es obligatorio', 'err'); return false; }
+        if (!usuario) { toast('El usuario es obligatorio', 'err'); return false; }
+        if (!password || password.length < 4) { toast('La contraseña es demasiado corta', 'err'); return false; }
+
+        await GTApi.crearGestor({ nombre, usuario, password, rol: val(root, 'rol') });
+        toast('Gestor creado: ' + usuario, 'ok');
+        vistaGestores();
+      }
+    });
+  }
+
+  /* ============================================================
      VISTA · KANBAN
      ============================================================ */
   async function vistaKanban() {
@@ -1400,7 +1578,7 @@
     view.innerHTML = `
       ${cabecera()}
       <div class="page-head">
-        <div><h1>Tablero de expedientes</h1><p>Arrastra las tarjetas para cambiar el estado del trámite</p></div>
+        <div><h1>Tablero de expedientes</h1><p>${ambito()} · arrastra las tarjetas para cambiar el estado</p></div>
         <button class="btn" id="btn-nuevo-exp">+ Nuevo expediente</button>
       </div>
 
@@ -1580,6 +1758,8 @@
         }
       } else if (seccion === 'kanban') {
         await vistaKanban();
+      } else if (seccion === 'gestores') {
+        await vistaGestores();
       } else {
         await vistaDashboard();
       }
@@ -1592,8 +1772,10 @@
   }
 
   /* ---------------- Arranque ---------------- */
-  session = GTAuth.requireSession();
-  if (session) {
+  (async function arrancar() {
+    session = GTAuth.requireSession();
+    if (!session) return;
+
     document.getElementById('user-avatar').textContent = session.iniciales;
     document.getElementById('user-nombre').textContent = session.nombre;
     document.getElementById('user-rol').textContent = session.rol === 'admin' ? 'Administrador' : 'Gestor';
@@ -1602,7 +1784,21 @@
       location.replace('index.html');
     });
 
+    // "Gestores" solo existe para el admin. Ocultarlo es cosmético: la
+    // vista se corta sola y el RLS no deja tocar usuarios a un gestor.
+    if (GTAuth.isAdmin()) document.getElementById('nav-gestores').classList.remove('hidden');
+
+    // Sin esperar a que la sesión entre en el cliente, la primera consulta
+    // saldría como anon y el RLS la devolvería vacía.
+    try {
+      await GTApi.listo;
+    } catch (e) {
+      GTAuth.logout();
+      location.replace('index.html');
+      return;
+    }
+
     window.addEventListener('hashchange', router);
     router();
-  }
+  })();
 })();

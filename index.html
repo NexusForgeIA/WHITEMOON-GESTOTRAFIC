@@ -46,8 +46,8 @@
 
     <div class="login-demo-hint">
       <b>Credenciales de demostración</b><br>
-      Gestor · <b>gestor</b> / <b>demo</b><br>
-      Administrador · <b>admin</b> / <b>demo</b>
+      Administrador · <b>admin</b> / <b>demo</b><br>
+      Gestor · <b>gestor</b> / <b>demo</b> · <b>marcos</b> / <b>demo</b>
     </div>
 
     <div class="login-foot">
@@ -57,27 +57,36 @@
   </form>
 </div>
 
+<script src="assets/js/config.js"></script>
 <script src="assets/js/auth.js"></script>
 <script>
 (function () {
-  // Si ya hay sesión de demo abierta, ir directo al panel.
+  // Si ya hay sesión abierta, ir directo al panel.
   if (GTAuth.getSession()) { location.replace('app.html'); return; }
 
   var form = document.getElementById('login-form');
   var err  = document.getElementById('login-err');
+  var btn  = document.getElementById('login-btn');
 
-  form.addEventListener('submit', function (e) {
+  form.addEventListener('submit', async function (e) {
     e.preventDefault();
     var usuario = document.getElementById('usuario').value.trim();
     var password = document.getElementById('password').value;
 
-    var session = GTAuth.login(usuario, password);
-    if (!session) {
-      err.textContent = 'Usuario o contraseña incorrectos. Prueba con gestor / demo.';
+    err.classList.add('hidden');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>';
+
+    try {
+      // Las credenciales se verifican en el servidor, no aquí.
+      await GTAuth.login(usuario, password);
+      location.href = 'app.html';
+    } catch (ex) {
+      err.textContent = ex.message || 'No se pudo iniciar sesión';
       err.classList.remove('hidden');
-      return;
+      btn.disabled = false;
+      btn.textContent = 'Entrar al panel';
     }
-    location.href = 'app.html';
   });
 })();
 </script>

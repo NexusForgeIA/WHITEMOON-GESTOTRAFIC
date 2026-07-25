@@ -47,6 +47,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="11" rx="1"/><rect x="17" y="4" width="4" height="7" rx="1"/></svg>
         Kanban
       </a>
+      <a href="#/gestores" data-route="gestores" id="nav-gestores" class="hidden">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Gestores
+      </a>
     </nav>
 
     <div class="sidebar-user">
@@ -67,9 +71,11 @@
 
 </div>
 
+<!-- config → auth → api: api.js necesita la sesión guardada por auth.js
+     para autenticar el cliente de Supabase antes de la primera consulta. -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script src="assets/js/auth.js"></script>
 <script src="assets/js/config.js"></script>
+<script src="assets/js/auth.js"></script>
 <script src="assets/js/tramites.js"></script>
 <script src="assets/js/api.js"></script>
 <script src="assets/js/contrato.js"></script>
