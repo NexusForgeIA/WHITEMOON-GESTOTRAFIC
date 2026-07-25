@@ -1,11 +1,14 @@
 /* ============================================================
    GestoTrafic · Aplicación (router + vistas)
+   Los formularios, el checklist documental y las pestañas de cada
+   expediente se generan a partir del catálogo GT_TRAMITES.
    ============================================================ */
 (function () {
   'use strict';
 
   const view = document.getElementById('view');
   const sidebar = document.getElementById('sidebar');
+  const T = window.GTTramites;
   let session = null;
 
   /* ---------------- Utilidades ---------------- */
@@ -32,6 +35,9 @@
       ? (c.razon_social || c.nombre)
       : [c.nombre, c.apellidos].filter(Boolean).join(' ');
   };
+
+  const svg = (path, cls) =>
+    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" ${cls ? `class="${cls}"` : ''}>${path}</svg>`;
 
   function toast(msg, tipo) {
     const t = document.createElement('div');
@@ -61,9 +67,14 @@
   const footer = () => `<div class="wm-foot">GestoTrafic · demo comercial · Hecho por <b>WhiteMoon Agencia IA</b> · whitemoon.es</div>`;
 
   const avisoRegulado = () => `<div class="regul-note">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+    ${svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>')}
     <div><b>GestoTrafic no conecta con la DGT ni con Hacienda.</b> El expediente queda <b>listo para presentar</b>: la gestoría lo presenta con el programa oficial de su colegio.</div>
   </div>`;
+
+  const avisoTramite = (tr) => tr.aviso ? `<div class="regul-note">
+    ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
+    <div>${tr.aviso}</div>
+  </div>` : '';
 
   /* ---------------- Modal ---------------- */
 
@@ -120,6 +131,84 @@
   };
 
   /* ============================================================
+     Renderizado de campos desde el catálogo
+     ============================================================ */
+
+  function campoHTML(c, valor) {
+    const id = 'f-' + c.n;
+    const req = c.req ? 'required' : '';
+    let control;
+
+    if (c.t === 'select') {
+      const ops = (c.op || []).map(o => {
+        const v = (typeof o === 'string') ? o : o.v;
+        const l = (typeof o === 'string') ? o : o.l;
+        const sel = (valor !== null && valor !== undefined && String(valor) === String(v))
+          || ((valor === null || valor === undefined) && c.def === v);
+        return `<option value="${h(v)}" ${sel ? 'selected' : ''}>${h(l)}</option>`;
+      }).join('');
+      control = `<select name="${h(c.n)}" id="${id}" ${req}>${ops}</select>`;
+
+    } else if (c.t === 'textarea') {
+      control = `<textarea name="${h(c.n)}" id="${id}" ${c.ph ? `placeholder="${h(c.ph)}"` : ''} ${req}>${h(valor || '')}</textarea>`;
+
+    } else {
+      const tipo = c.t === 'number' ? 'number' : (c.t === 'date' ? 'date' : 'text');
+      control = `<input type="${tipo}" name="${h(c.n)}" id="${id}"
+        value="${h(valor === null || valor === undefined ? '' : valor)}"
+        ${c.paso ? `step="${h(c.paso)}"` : ''} ${c.t === 'number' ? 'min="0"' : ''}
+        ${c.ph ? `placeholder="${h(c.ph)}"` : ''} ${req}>`;
+    }
+
+    return `<div class="field ${c.full || c.t === 'textarea' ? 'full' : ''}">
+      <label for="${id}">${h(c.l)}${c.req ? ' *' : ''}</label>${control}</div>`;
+  }
+
+  /** `conCopiar` solo en el alta: es donde existe el selector de cliente. */
+  function seccionesHTML(tr, exp, conCopiar) {
+    return tr.secciones.map(s => `
+      <div class="form-sec">${h(s.t)}</div>
+      ${(conCopiar && s.copiarCliente) ? `<label class="flex" style="font-size:.8rem;color:var(--muted);margin-bottom:12px;cursor:pointer">
+        <input type="checkbox" data-copiar="${h(s.t)}" style="width:auto"> Rellenar con los datos del cliente seleccionado
+      </label>` : ''}
+      <div class="form-grid">
+        ${s.campos.map(c => campoHTML(c, exp ? T.leer(exp, c.n) : null)).join('')}
+      </div>`).join('');
+  }
+
+  /** Separa los valores del formulario en columnas propias y en `datos` jsonb. */
+  function recoger(root, tr) {
+    const fila = {}, datos = {};
+    T.campos(tr).forEach(c => {
+      let v = c.t === 'number' ? num(root, c.n) : val(root, c.n);
+      if (c.t === 'number' && (v === null || isNaN(v))) v = null;
+      if (c.col) fila[c.n] = v; else datos[c.n] = v;
+    });
+    fila.datos = datos;
+    return fila;
+  }
+
+  /** Rellena los campos de "persona" de una sección con los datos del cliente. */
+  function copiarCliente(form, seccion, cliente) {
+    if (!cliente) return false;
+    const nombre = nombreCliente(cliente);
+    const dir = [cliente.direccion, cliente.ciudad].filter(Boolean).join(', ');
+    const mapa = {
+      nombre: ['titular_nombre', 'comprador_nombre', 'vendedor_nombre'],
+      nif: ['titular_nif', 'comprador_nif', 'vendedor_nif'],
+      direccion: ['titular_direccion', 'comprador_direccion', 'vendedor_direccion'],
+      telefono: ['titular_telefono', 'comprador_telefono', 'vendedor_telefono']
+    };
+    const nombres = seccion.campos.map(c => c.n);
+    const set = (n, v) => { const el = form.querySelector(`[name="${n}"]`); if (el) el.value = v || ''; };
+    mapa.nombre.forEach(n => { if (nombres.includes(n)) set(n, nombre); });
+    mapa.nif.forEach(n => { if (nombres.includes(n)) set(n, cliente.nif); });
+    mapa.direccion.forEach(n => { if (nombres.includes(n)) set(n, dir); });
+    mapa.telefono.forEach(n => { if (nombres.includes(n)) set(n, cliente.telefono); });
+    return true;
+  }
+
+  /* ============================================================
      VISTA · DASHBOARD
      ============================================================ */
   async function vistaDashboard() {
@@ -155,9 +244,9 @@
           <div class="kpi-sub">particulares y empresas</div>
         </div>
         <div class="kpi g">
-          <div class="kpi-lbl">Impuestos calculados</div>
+          <div class="kpi-lbl">ITP calculado</div>
           <div class="kpi-num">${eur(k.impuestosMes)}</div>
-          <div class="kpi-sub">ITP + tasas · este mes</div>
+          <div class="kpi-sub">transferencias · este mes</div>
         </div>
       </div>
 
@@ -177,16 +266,33 @@
         </div>
 
         <div class="card">
+          <div class="card-t">Expedientes por tipo de trámite</div>
+          <div class="estado-bars">
+            ${window.GT_TRAMITES.map(tr => {
+              const n = expedientes.filter(e => e.tipo_tramite === tr.id).length;
+              const max = Math.max(1, ...window.GT_TRAMITES.map(t2 => expedientes.filter(e => e.tipo_tramite === t2.id).length));
+              return `<div class="estado-bar-row">
+                <span class="t-muted">${h(tr.corto)}</span>
+                <div class="estado-bar-track">
+                  <div class="estado-bar-fill" style="width:${(n / max * 100).toFixed(1)}%;background:var(--p)"></div>
+                </div>
+                <b>${n}</b>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+
+        <div class="card">
           <div class="card-t">Últimos expedientes</div>
           ${recientes.length ? `<div class="table-wrap"><table>
-            <thead><tr><th>Referencia</th><th>Cliente</th><th>Vehículo</th><th>Estado</th><th>Impuestos</th></tr></thead>
+            <thead><tr><th>Referencia</th><th>Trámite</th><th>Cliente</th><th>Vehículo</th><th>Estado</th></tr></thead>
             <tbody>${recientes.map(e => `
               <tr class="clickable" data-exp="${h(e.id)}">
                 <td class="t-mono">${h(e.referencia)}</td>
+                <td><span class="badge badge-tramite">${h(T.tramite(e.tipo_tramite).corto)}</span></td>
                 <td>${h(nombreCliente(e.cliente))}</td>
                 <td>${h([e.marca, e.modelo].filter(Boolean).join(' ') || '—')}<br><span class="t-muted" style="font-size:.76rem">${h(e.matricula || '')}</span></td>
                 <td><span class="badge badge-${h(e.estado)}">${h(estadoInfo(e.estado).label)}</span></td>
-                <td class="t-num">${eur(e.total_impuestos)}</td>
               </tr>`).join('')}</tbody></table></div>`
           : `<div class="empty"><p>Todavía no hay expedientes. Crea el primero para ver el flujo completo.</p><button class="btn" data-nuevo-exp>+ Nuevo expediente</button></div>`}
         </div>
@@ -224,7 +330,7 @@
             <td class="t-muted">${fecha(c.created_at)}</td>
           </tr>`).join('')}</tbody></table></div>`
       : `<div class="empty">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+          ${svg('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>')}
           <p>Aún no hay clientes dados de alta.</p>
           <button class="btn" id="btn-nuevo-cliente-2">+ Dar de alta el primer cliente</button>
         </div>`}
@@ -244,7 +350,7 @@
           <option value="empresa">Empresa</option>
         </select>
       </div>
-      <div class="grid-2">
+      <div class="form-grid">
         <div class="field" data-solo-particular>
           <label>Nombre *</label><input name="nombre" placeholder="María" required>
         </div>
@@ -260,12 +366,12 @@
       </div>
 
       <div class="form-sec">Contacto</div>
-      <div class="grid-2">
+      <div class="form-grid">
         <div class="field"><label>Teléfono</label><input name="telefono" placeholder="600 000 000"></div>
         <div class="field"><label>Email</label><input name="email" type="email" placeholder="cliente@email.com"></div>
       </div>
       <div class="field"><label>Dirección</label><input name="direccion" placeholder="Calle Mieses 1, 3º"></div>
-      <div class="grid-3">
+      <div class="form-grid">
         <div class="field"><label>C.P.</label><input name="cp" placeholder="28220"></div>
         <div class="field"><label>Ciudad</label><input name="ciudad" placeholder="Majadahonda"></div>
         <div class="field"><label>Provincia</label><input name="provincia" placeholder="Madrid"></div>
@@ -339,14 +445,14 @@
           <div class="card">
             <div class="card-t">Historial de trámites (${expedientes.length})</div>
             ${expedientes.length ? `<div class="table-wrap"><table>
-              <thead><tr><th>Referencia</th><th>Trámite</th><th>Vehículo</th><th>Estado</th><th>Impuestos</th></tr></thead>
+              <thead><tr><th>Referencia</th><th>Trámite</th><th>Vehículo</th><th>Estado</th><th>Fecha</th></tr></thead>
               <tbody>${expedientes.map(e => `
                 <tr class="clickable" data-exp="${h(e.id)}">
                   <td class="t-mono">${h(e.referencia)}</td>
-                  <td>Transferencia<br><span class="t-muted" style="font-size:.76rem">${fecha(e.created_at)}</span></td>
+                  <td><span class="badge badge-tramite">${h(T.tramite(e.tipo_tramite).corto)}</span></td>
                   <td>${h([e.marca, e.modelo].filter(Boolean).join(' ') || '—')}<br><span class="t-muted" style="font-size:.76rem">${h(e.matricula || '')}</span></td>
                   <td><span class="badge badge-${h(e.estado)}">${h(estadoInfo(e.estado).label)}</span></td>
-                  <td class="t-num">${eur(e.total_impuestos)}</td>
+                  <td class="t-muted">${fecha(e.created_at)}</td>
                 </tr>`).join('')}</tbody></table></div>`
             : `<div class="empty" style="padding:30px 16px"><p>Este cliente todavía no tiene trámites.</p></div>`}
           </div>
@@ -373,7 +479,7 @@
     view.querySelector('#btn-exp-cliente').addEventListener('click', () => (location.hash = '#/expedientes/nuevo?cliente=' + id));
 
     const btnDel = view.querySelector('#btn-borrar-cli');
-    if (btnDel) btnDel.addEventListener('click', async () => {
+    if (btnDel) btnDel.addEventListener('click', () => {
       modal({
         titulo: 'Eliminar cliente',
         cuerpo: `<p>¿Seguro que quieres eliminar la ficha de <b>${h(nombreCliente(c))}</b>?</p>
@@ -389,46 +495,77 @@
   }
 
   /* ============================================================
-     VISTA · LISTA DE EXPEDIENTES
+     VISTA · LISTA DE EXPEDIENTES (con filtro por tipo)
      ============================================================ */
+  let filtroTipo = 'todos';
+
   async function vistaExpedientes() {
     loading('Cargando expedientes…');
-    const expedientes = await GTApi.listarExpedientes();
+    const todos = await GTApi.listarExpedientes();
 
-    view.innerHTML = `
-      ${cabecera()}
-      <div class="page-head">
-        <div><h1>Expedientes</h1><p>Transferencias de vehículo · ${expedientes.length} en total</p></div>
-        <button class="btn" id="btn-nuevo-exp">+ Nuevo expediente</button>
-      </div>
+    function pintar() {
+      const expedientes = filtroTipo === 'todos' ? todos : todos.filter(e => e.tipo_tramite === filtroTipo);
+      const cont = view.querySelector('#lista-exp');
 
-      ${expedientes.length ? `<div class="table-wrap"><table>
-        <thead><tr><th>Referencia</th><th>Cliente</th><th>Vehículo</th><th>Matrícula</th><th>Estado</th><th>ITP</th><th>Total</th></tr></thead>
+      cont.innerHTML = expedientes.length ? `<div class="table-wrap"><table>
+        <thead><tr><th>Referencia</th><th>Trámite</th><th>Cliente</th><th>Vehículo</th><th>Matrícula</th><th>Estado</th><th>ITP</th></tr></thead>
         <tbody>${expedientes.map(e => `
           <tr class="clickable" data-exp="${h(e.id)}">
             <td class="t-mono">${h(e.referencia)}</td>
+            <td><span class="badge badge-tramite">${h(T.tramite(e.tipo_tramite).corto)}</span></td>
             <td>${h(nombreCliente(e.cliente))}</td>
             <td>${h([e.marca, e.modelo].filter(Boolean).join(' ') || '—')}</td>
             <td class="t-mono">${h(e.matricula || '—')}</td>
             <td><span class="badge badge-${h(e.estado)}">${h(estadoInfo(e.estado).label)}</span></td>
-            <td class="t-num">${eur(e.itp_importe)}</td>
-            <td class="t-num"><b>${eur(e.total_impuestos)}</b></td>
+            <td class="t-num">${T.tramite(e.tipo_tramite).calculo === 'itp' ? eur(e.total_impuestos) : '<span class="t-muted">n/a</span>'}</td>
           </tr>`).join('')}</tbody></table></div>`
-      : `<div class="empty">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
-          <p>Aún no hay expedientes abiertos.</p>
-          <button class="btn" id="btn-nuevo-exp-2">+ Crear el primer expediente</button>
-        </div>`}
+        : `<div class="empty">
+            ${svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>')}
+            <p>${filtroTipo === 'todos' ? 'Aún no hay expedientes abiertos.' : 'No hay expedientes de este tipo de trámite.'}</p>
+            <button class="btn" id="btn-nuevo-exp-2">+ Crear expediente</button>
+          </div>`;
+
+      cont.querySelectorAll('[data-exp]').forEach(tr => tr.addEventListener('click', () => (location.hash = '#/expedientes/' + tr.dataset.exp)));
+      const b2 = cont.querySelector('#btn-nuevo-exp-2');
+      if (b2) b2.addEventListener('click', () => (location.hash = '#/expedientes/nuevo'));
+
+      view.querySelector('#cuenta-exp').textContent =
+        `${expedientes.length} de ${todos.length} expediente${todos.length === 1 ? '' : 's'}`;
+    }
+
+    view.innerHTML = `
+      ${cabecera()}
+      <div class="page-head">
+        <div><h1>Expedientes</h1><p id="cuenta-exp">—</p></div>
+        <button class="btn" id="btn-nuevo-exp">+ Nuevo expediente</button>
+      </div>
+
+      <div class="filtro-bar">
+        <span class="t-muted" style="font-size:.78rem">Filtrar por trámite</span>
+        <select id="filtro-tipo">
+          <option value="todos">Todos los trámites (${todos.length})</option>
+          ${window.GT_TRAMITES.map(tr => {
+            const n = todos.filter(e => e.tipo_tramite === tr.id).length;
+            return `<option value="${h(tr.id)}" ${filtroTipo === tr.id ? 'selected' : ''}>${h(tr.nombre)} (${n})</option>`;
+          }).join('')}
+        </select>
+      </div>
+
+      <div id="lista-exp"></div>
       ${footer()}`;
 
-    view.querySelectorAll('#btn-nuevo-exp, #btn-nuevo-exp-2').forEach(b => b.addEventListener('click', () => (location.hash = '#/expedientes/nuevo')));
-    view.querySelectorAll('[data-exp]').forEach(tr => tr.addEventListener('click', () => (location.hash = '#/expedientes/' + tr.dataset.exp)));
+    view.querySelector('#btn-nuevo-exp').addEventListener('click', () => (location.hash = '#/expedientes/nuevo'));
+    view.querySelector('#filtro-tipo').addEventListener('change', (e) => { filtroTipo = e.target.value; pintar(); });
+    pintar();
   }
 
   /* ============================================================
-     VISTA · NUEVO EXPEDIENTE
+     VISTA · NUEVO EXPEDIENTE (paso 1: tipo · paso 2: formulario)
      ============================================================ */
-  async function vistaNuevoExpediente(clientePre) {
+  async function vistaNuevoExpediente(clientePre, tipoPre) {
+    if (!tipoPre) return vistaElegirTipo(clientePre);
+
+    const tr = T.tramite(tipoPre);
     loading('Preparando formulario…');
     const clientes = await GTApi.listarClientes();
 
@@ -436,9 +573,9 @@
       ${cabecera()}
       <div class="page-head">
         <div>
-          <a href="#/expedientes" class="t-muted" style="font-size:.8rem">← Expedientes</a>
-          <h1 style="margin-top:6px">Nuevo expediente</h1>
-          <p>Transferencia de vehículo · trámite estrella</p>
+          <a href="#/expedientes/nuevo${clientePre ? '?cliente=' + h(clientePre) : ''}" class="t-muted" style="font-size:.8rem">← Cambiar tipo de trámite</a>
+          <h1 style="margin-top:6px">${h(tr.nombre)}</h1>
+          <p>${h(tr.descripcion)}</p>
         </div>
       </div>
 
@@ -453,68 +590,17 @@
             </select>
           </div>`
           : `<div class="regul-note" style="margin-bottom:6px">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>
+              ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
               <div>No hay clientes dados de alta. <a href="#/clientes">Crea primero un cliente</a> para asociarlo al expediente.</div>
             </div>`}
 
-          <div class="form-sec">Datos del vehículo</div>
-          <div class="grid-2">
-            <div class="field"><label>Marca *</label><input name="marca" placeholder="Seat" required></div>
-            <div class="field"><label>Modelo *</label><input name="modelo" placeholder="León 1.5 TSI" required></div>
-          </div>
-          <div class="grid-3">
-            <div class="field"><label>Matrícula *</label><input name="matricula" placeholder="1234 ABC" required></div>
-            <div class="field"><label>Fecha 1ª matriculación *</label><input name="fecha_matriculacion" type="date" required></div>
-            <div class="field">
-              <label>Combustible</label>
-              <select name="combustible">${window.GT_COMBUSTIBLES.map(c => `<option>${h(c)}</option>`).join('')}</select>
-            </div>
-          </div>
-          <div class="grid-3">
-            <div class="field"><label>Cilindrada (c.c.)</label><input name="cilindrada" type="number" min="0" placeholder="1498"></div>
-            <div class="field"><label>Potencia fiscal (CVf)</label><input name="cvf" type="number" step="0.01" min="0" placeholder="11.5"></div>
-            <div class="field">
-              <label>Etiqueta DGT</label>
-              <select name="etiqueta_dgt">${window.GT_ETIQUETAS.map(e => `<option value="${h(e.id)}">${h(e.label)}</option>`).join('')}</select>
-            </div>
-          </div>
+          ${seccionesHTML(tr, null, true)}
 
-          <div class="form-sec">Vendedor</div>
-          <div class="grid-2">
-            <div class="field"><label>Nombre y apellidos</label><input name="vendedor_nombre" placeholder="Antonio Ruiz Pérez"></div>
-            <div class="field"><label>DNI / NIF</label><input name="vendedor_nif" placeholder="11223344A"></div>
-          </div>
-          <div class="grid-2">
-            <div class="field"><label>Domicilio</label><input name="vendedor_direccion" placeholder="Av. de España 22, Madrid"></div>
-            <div class="field"><label>Teléfono</label><input name="vendedor_telefono" placeholder="600 111 222"></div>
-          </div>
-
-          <div class="form-sec">Comprador</div>
-          <label class="flex" style="font-size:.8rem;color:var(--muted);margin-bottom:12px;cursor:pointer">
-            <input type="checkbox" id="copiar-cliente" style="width:auto"> Rellenar con los datos del cliente seleccionado
-          </label>
-          <div class="grid-2">
-            <div class="field"><label>Nombre y apellidos</label><input name="comprador_nombre" placeholder="María García López"></div>
-            <div class="field"><label>DNI / NIF</label><input name="comprador_nif" placeholder="12345678Z"></div>
-          </div>
-          <div class="grid-2">
-            <div class="field"><label>Domicilio</label><input name="comprador_direccion" placeholder="Calle Mieses 1, Majadahonda"></div>
-            <div class="field"><label>Teléfono</label><input name="comprador_telefono" placeholder="600 333 444"></div>
-          </div>
-
-          <div class="form-sec">Fiscalidad</div>
-          <div class="grid-3">
-            <div class="field">
-              <label>CCAA del comprador *</label>
-              <select name="ccaa" required>${window.GT_CCAA.map(c => `<option ${c === 'Comunidad de Madrid' ? 'selected' : ''}>${h(c)}</option>`).join('')}</select>
-            </div>
-            <div class="field"><label>Valor BOE Anexo I (€)</label><input name="valor_boe" type="number" step="0.01" min="0" placeholder="21000"></div>
-            <div class="field"><label>Precio de contrato (€)</label><input name="precio_contrato" type="number" step="0.01" min="0" placeholder="8500"></div>
-          </div>
-
-          <div class="field"><label>Notas del expediente</label><textarea name="notas" placeholder="Observaciones…"></textarea></div>
+          <div class="form-sec">Notas</div>
+          <div class="field"><textarea name="notas" placeholder="Observaciones del expediente…"></textarea></div>
         </div>
 
+        ${avisoTramite(tr)}
         ${avisoRegulado()}
 
         <div class="flex">
@@ -526,58 +612,76 @@
 
     const form = view.querySelector('#form-exp');
 
-    const chk = view.querySelector('#copiar-cliente');
-    chk.addEventListener('change', () => {
-      if (!chk.checked) return;
-      const sel = form.querySelector('[name="cliente_id"]');
-      const c = clientes.find(x => x.id === (sel && sel.value));
-      if (!c) { toast('Selecciona antes un cliente', 'err'); chk.checked = false; return; }
-      form.querySelector('[name="comprador_nombre"]').value = nombreCliente(c);
-      form.querySelector('[name="comprador_nif"]').value = c.nif || '';
-      form.querySelector('[name="comprador_direccion"]').value = [c.direccion, c.ciudad].filter(Boolean).join(', ');
-      form.querySelector('[name="comprador_telefono"]').value = c.telefono || '';
+    form.querySelectorAll('[data-copiar]').forEach(chk => {
+      chk.addEventListener('change', () => {
+        if (!chk.checked) return;
+        const sel = form.querySelector('[name="cliente_id"]');
+        const c = clientes.find(x => x.id === (sel && sel.value));
+        if (!c) { toast('Selecciona antes un cliente', 'err'); chk.checked = false; return; }
+        const seccion = tr.secciones.find(s => s.t === chk.dataset.copiar);
+        copiarCliente(form, seccion, c);
+      });
     });
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const btn = view.querySelector('#btn-crear');
       btn.disabled = true;
-      const prev = btn.textContent;
       btn.innerHTML = '<span class="spinner"></span>';
       try {
-        const exp = await GTApi.crearExpediente({
-          cliente_id: val(form, 'cliente_id'),
-          tipo_tramite: 'transferencia',
-          estado: 'nuevo',
-          marca: val(form, 'marca'),
-          modelo: val(form, 'modelo'),
-          matricula: val(form, 'matricula'),
-          fecha_matriculacion: val(form, 'fecha_matriculacion'),
-          combustible: val(form, 'combustible'),
-          cilindrada: num(form, 'cilindrada'),
-          cvf: num(form, 'cvf'),
-          etiqueta_dgt: val(form, 'etiqueta_dgt'),
-          ccaa: val(form, 'ccaa'),
-          valor_boe: num(form, 'valor_boe'),
-          precio_contrato: num(form, 'precio_contrato'),
-          vendedor_nombre: val(form, 'vendedor_nombre'),
-          vendedor_nif: val(form, 'vendedor_nif'),
-          vendedor_direccion: val(form, 'vendedor_direccion'),
-          vendedor_telefono: val(form, 'vendedor_telefono'),
-          comprador_nombre: val(form, 'comprador_nombre'),
-          comprador_nif: val(form, 'comprador_nif'),
-          comprador_direccion: val(form, 'comprador_direccion'),
-          comprador_telefono: val(form, 'comprador_telefono'),
-          notas: val(form, 'notas')
-        });
+        const datos = recoger(form, tr);
+        datos.cliente_id = val(form, 'cliente_id');
+        datos.tipo_tramite = tr.id;
+        datos.estado = 'nuevo';
+        datos.notas = val(form, 'notas');
+
+        const exp = await GTApi.crearExpediente(datos);
         toast('Expediente ' + exp.referencia + ' creado', 'ok');
         location.hash = '#/expedientes/' + exp.id;
       } catch (err) {
         toast(err.message || 'No se pudo crear el expediente', 'err');
         btn.disabled = false;
-        btn.textContent = prev;
+        btn.textContent = 'Crear expediente';
       }
     });
+  }
+
+  function vistaElegirTipo(clientePre) {
+    view.innerHTML = `
+      ${cabecera()}
+      <div class="page-head">
+        <div>
+          <a href="#/expedientes" class="t-muted" style="font-size:.8rem">← Expedientes</a>
+          <h1 style="margin-top:6px">Nuevo expediente</h1>
+          <p>Elige el tipo de trámite. El formulario y el checklist se adaptan solos.</p>
+        </div>
+      </div>
+
+      <div class="tipo-grid">
+        ${window.GT_TRAMITES.map(tr => `
+          <button type="button" class="tipo-card" data-tipo="${h(tr.id)}">
+            <div class="tipo-card-ico">${svg(tr.icono)}</div>
+            <div class="tipo-card-txt">
+              <strong>${h(tr.nombre)}</strong>
+              <small>${h(tr.descripcion)}</small>
+              <div class="tipo-card-tags">
+                <span class="tag">${T.docsDe(tr, {}).filter(d => d.obligatorio).length} docs</span>
+                ${tr.calculo === 'itp' ? '<span class="tag calc">Calcula ITP</span>' : ''}
+                ${tr.genera === 'contrato' ? '<span class="tag doc">Genera contrato</span>' : ''}
+                ${tr.genera === 'comunicacion' ? '<span class="tag doc">Genera comunicación</span>' : ''}
+              </div>
+            </div>
+          </button>`).join('')}
+      </div>
+
+      <div style="margin-top:20px">${avisoRegulado()}</div>
+      ${footer()}`;
+
+    view.querySelectorAll('[data-tipo]').forEach(b => b.addEventListener('click', () => {
+      const q = ['tipo=' + b.dataset.tipo];
+      if (clientePre) q.push('cliente=' + clientePre);
+      location.hash = '#/expedientes/nuevo?' + q.join('&');
+    }));
   }
 
   /* ============================================================
@@ -586,14 +690,26 @@
   async function vistaExpediente(id) {
     loading('Cargando expediente…');
     const [exp, docs] = await Promise.all([GTApi.obtenerExpediente(id), GTApi.listarDocumentos(id)]);
+    const tr = T.tramite(exp.tipo_tramite);
+
+    const pestanas = [];
+    if (tr.calculo === 'itp') pestanas.push({ id: 'itp', label: 'Calculadora ITP' });
+    pestanas.push({ id: 'datos', label: 'Datos del expediente' });
+    pestanas.push({ id: 'docs', label: 'Documentación' });
+    if (tr.genera === 'contrato') pestanas.push({ id: 'genera', label: 'Contrato' });
+    if (tr.genera === 'comunicacion') pestanas.push({ id: 'genera', label: 'Comunicación' });
 
     view.innerHTML = `
       ${cabecera()}
       <div class="page-head">
         <div>
           <a href="#/expedientes" class="t-muted" style="font-size:.8rem">← Expedientes</a>
-          <h1 style="margin-top:6px">${h([exp.marca, exp.modelo].filter(Boolean).join(' ') || 'Expediente')}</h1>
-          <p><span class="t-mono">${h(exp.referencia)}</span> · ${h(exp.matricula || 'sin matrícula')} · ${h(nombreCliente(exp.cliente))}</p>
+          <h1 style="margin-top:6px">${h([exp.marca, exp.modelo].filter(Boolean).join(' ') || tr.nombre)}</h1>
+          <p>
+            <span class="badge badge-tramite">${h(tr.nombre)}</span>
+            <span class="t-mono" style="margin-left:8px">${h(exp.referencia)}</span>
+            · ${h(exp.matricula || 'sin matrícula')} · ${h(nombreCliente(exp.cliente))}
+          </p>
         </div>
         <div class="row-actions">
           <select id="sel-estado" class="tab" style="padding:8px 13px">
@@ -604,10 +720,7 @@
       </div>
 
       <div class="tabs" id="tabs">
-        <button class="tab active" data-tab="itp">Calculadora ITP</button>
-        <button class="tab" data-tab="datos">Datos del expediente</button>
-        <button class="tab" data-tab="docs">Documentación</button>
-        <button class="tab" data-tab="contrato">Contrato</button>
+        ${pestanas.map((p, i) => `<button class="tab ${i === 0 ? 'active' : ''}" data-tab="${p.id}">${h(p.label)}</button>`).join('')}
       </div>
 
       <div id="tab-content"></div>
@@ -616,11 +729,11 @@
     const cont = view.querySelector('#tab-content');
     const paneles = {
       itp: () => panelITP(exp, cont),
-      datos: () => panelDatos(exp, cont),
-      docs: () => panelDocs(exp, docs, cont),
-      contrato: () => panelContrato(exp, docs, cont)
+      datos: () => panelDatos(exp, tr, cont),
+      docs: () => panelDocs(exp, tr, docs, cont),
+      genera: () => panelGenera(exp, tr, cont)
     };
-    paneles.itp();
+    paneles[pestanas[0].id]();
 
     view.querySelectorAll('#tabs .tab').forEach(t => t.addEventListener('click', () => {
       view.querySelectorAll('#tabs .tab').forEach(x => x.classList.remove('active'));
@@ -649,7 +762,7 @@
     }));
   }
 
-  /* ---------- Panel: Calculadora ITP ---------- */
+  /* ---------- Panel: Calculadora ITP (solo transferencia) ---------- */
   function panelITP(exp, cont) {
     cont.innerHTML = `
       <div class="detail-grid">
@@ -664,7 +777,7 @@
             Calculado en Supabase con el motor <span class="t-mono">gestotrafic-itp</span>.
           </p>
 
-          <div class="grid-3">
+          <div class="form-grid">
             <div class="field">
               <label>Valor BOE Anexo I (€) *</label>
               <input name="valor_boe" type="number" step="0.01" min="0" value="${exp.valor_boe ?? ''}" placeholder="21000">
@@ -677,8 +790,6 @@
               <label>Fecha 1ª matriculación *</label>
               <input name="fecha_matriculacion" type="date" value="${exp.fecha_matriculacion ?? ''}">
             </div>
-          </div>
-          <div class="grid-3">
             <div class="field">
               <label>CCAA del comprador</label>
               <select name="ccaa">${window.GT_CCAA.map(c => `<option ${c === exp.ccaa ? 'selected' : ''}>${h(c)}</option>`).join('')}</select>
@@ -691,8 +802,6 @@
               <label>Potencia fiscal (CVf)</label>
               <input name="cvf" type="number" step="0.01" min="0" value="${exp.cvf ?? ''}">
             </div>
-          </div>
-          <div class="grid-2">
             <div class="field">
               <label>Etiqueta DGT</label>
               <select name="etiqueta_dgt">${window.GT_ETIQUETAS.map(e => `<option value="${h(e.id)}" ${e.id === (exp.etiqueta_dgt || '') ? 'selected' : ''}>${h(e.label)}</option>`).join('')}</select>
@@ -813,74 +922,85 @@
       <br><span style="opacity:.7">Fuente: ${h(d.fuente || 'BOE 2026')} · antigüedad ${h(d.anios_uso)} años.</span>`;
   }
 
-  /* ---------- Panel: Datos ---------- */
-  function panelDatos(exp, cont) {
+  /* ---------- Panel: Datos (formulario editable generado por catálogo) ---------- */
+  function panelDatos(exp, tr, cont) {
     cont.innerHTML = `
       <div class="detail-grid">
-        <div class="stack">
-          <div class="card">
-            <div class="card-t">Vendedor</div>
-            <dl class="dl">
-              <dt>Nombre</dt><dd>${h(exp.vendedor_nombre || '—')}</dd>
-              <dt>DNI / NIF</dt><dd class="t-mono">${h(exp.vendedor_nif || '—')}</dd>
-              <dt>Domicilio</dt><dd>${h(exp.vendedor_direccion || '—')}</dd>
-              <dt>Teléfono</dt><dd>${h(exp.vendedor_telefono || '—')}</dd>
-            </dl>
+        <form class="card" id="form-datos" style="align-self:start">
+          <div class="flex" style="margin-bottom:2px">
+            <div class="card-t" style="margin:0">Datos de ${h(tr.corto.toLowerCase())}</div>
+            <div class="spacer"></div>
+            <button type="submit" class="btn btn-sm" id="btn-guardar">Guardar cambios</button>
           </div>
-          <div class="card">
-            <div class="card-t">Comprador</div>
-            <dl class="dl">
-              <dt>Nombre</dt><dd>${h(exp.comprador_nombre || '—')}</dd>
-              <dt>DNI / NIF</dt><dd class="t-mono">${h(exp.comprador_nif || '—')}</dd>
-              <dt>Domicilio</dt><dd>${h(exp.comprador_direccion || '—')}</dd>
-              <dt>Teléfono</dt><dd>${h(exp.comprador_telefono || '—')}</dd>
-            </dl>
-          </div>
-        </div>
+          ${seccionesHTML(tr, exp)}
+          <div class="form-sec">Notas</div>
+          <div class="field"><textarea name="notas" placeholder="Observaciones…">${h(exp.notas || '')}</textarea></div>
+        </form>
+
         <div class="stack">
           <div class="card">
             <div class="card-t">Expediente</div>
             <dl class="dl">
               <dt>Referencia</dt><dd class="t-mono">${h(exp.referencia)}</dd>
-              <dt>Trámite</dt><dd>Transferencia</dd>
+              <dt>Trámite</dt><dd>${h(tr.nombre)}</dd>
               <dt>Estado</dt><dd><span class="badge badge-${h(exp.estado)}">${h(estadoInfo(exp.estado).label)}</span></dd>
               <dt>Cliente</dt><dd>${h(nombreCliente(exp.cliente))}</dd>
-              <dt>CCAA</dt><dd>${h(exp.ccaa || '—')}</dd>
               <dt>Apertura</dt><dd>${fecha(exp.created_at)}</dd>
+              <dt>Cálculo fiscal</dt><dd>${tr.calculo === 'itp' ? 'ITP (automático)' : 'No aplica'}</dd>
             </dl>
-            ${exp.notas ? `<div style="margin-top:15px;padding-top:13px;border-top:1px solid var(--border-2)">
-              <div class="card-t" style="margin-bottom:7px">Notas</div>
-              <p class="t-muted" style="margin:0;font-size:.82rem">${h(exp.notas)}</p></div>` : ''}
           </div>
+          ${avisoTramite(tr)}
+          ${avisoRegulado()}
         </div>
       </div>`;
+
+    const form = cont.querySelector('#form-datos');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = cont.querySelector('#btn-guardar');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>';
+      try {
+        const cambios = recoger(form, tr);
+        cambios.notas = val(form, 'notas');
+        await GTApi.actualizarExpediente(exp.id, cambios);
+        Object.assign(exp, cambios);
+        toast('Datos guardados', 'ok');
+      } catch (err) {
+        toast(err.message || 'No se pudieron guardar', 'err');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Guardar cambios';
+      }
+    });
   }
 
   /* ---------- Panel: Documentación ---------- */
-  function panelDocs(exp, docs, cont) {
+  function panelDocs(exp, tr, docs, cont) {
     const porTipo = {};
     docs.forEach(d => { porTipo[d.tipo] = d; });
 
-    const obligatorios = window.GT_DOCS_TRANSFERENCIA.filter(d => d.obligatorio);
+    const aplicables = T.docsDe(tr, exp);
+    const obligatorios = aplicables.filter(d => d.obligatorio);
     const recibidos = obligatorios.filter(d => porTipo[d.tipo]).length;
-    const pct = obligatorios.length ? (recibidos / obligatorios.length * 100) : 0;
+    const pct = obligatorios.length ? (recibidos / obligatorios.length * 100) : 100;
 
     cont.innerHTML = `
       <div class="card" style="max-width:860px">
         <div class="flex">
-          <div class="card-t" style="margin:0">Checklist documental · transferencia</div>
+          <div class="card-t" style="margin:0">Checklist documental · ${h(tr.corto.toLowerCase())}</div>
           <div class="spacer"></div>
           <b style="font-size:.84rem">${recibidos} / ${obligatorios.length} obligatorios</b>
         </div>
         <div class="checklist-bar"><div class="checklist-fill" style="width:${pct}%"></div></div>
 
-        ${window.GT_DOCS_TRANSFERENCIA.map(def => {
+        ${aplicables.map(def => {
           const doc = porTipo[def.tipo];
           return `<div class="doc-row ${doc ? 'ok' : ''}">
             <div class="doc-ico">
               ${doc
                 ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`
-                : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`}
+                : svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>')}
             </div>
             <div class="doc-info">
               <strong>${h(def.label)} ${def.obligatorio ? '' : '<span class="t-muted" style="font-weight:400;font-size:.74rem">· opcional</span>'}</strong>
@@ -907,18 +1027,16 @@
         if (!file) return;
         if (file.size > 10 * 1024 * 1024) { toast('El archivo supera los 10 MB', 'err'); inp.value = ''; return; }
 
-        const label = inp.closest('.file-label');
-        label.innerHTML = '<span class="spinner"></span>';
+        inp.closest('.file-label').innerHTML = '<span class="spinner"></span>';
         try {
           await GTApi.subirDocumento(exp.id, inp.dataset.tipo, file);
           const nuevos = await GTApi.listarDocumentos(exp.id);
           docs.length = 0; nuevos.forEach(d => docs.push(d));
           toast('Documento subido', 'ok');
-          panelDocs(exp, docs, cont);
         } catch (err) {
           toast(err.message || 'No se pudo subir', 'err');
-          panelDocs(exp, docs, cont);
         }
+        panelDocs(exp, tr, docs, cont);
       });
     });
 
@@ -932,26 +1050,36 @@
           const nuevos = await GTApi.listarDocumentos(exp.id);
           docs.length = 0; nuevos.forEach(d => docs.push(d));
           toast('Documento eliminado', 'ok');
-          panelDocs(exp, docs, cont);
+          panelDocs(exp, tr, docs, cont);
         } catch (err) { toast(err.message, 'err'); b.disabled = false; }
       });
     });
   }
 
-  /* ---------- Panel: Contrato ---------- */
-  function panelContrato(exp, docs, cont) {
+  /* ---------- Panel: documento generado ---------- */
+  function panelGenera(exp, tr, cont) {
+    const esContrato = tr.genera === 'contrato';
+    const titulo = esContrato ? 'Contrato de compraventa pre-rellenado' : 'Comunicación de venta pre-rellenada';
+
     const faltan = [];
-    if (!exp.vendedor_nombre) faltan.push('nombre del vendedor');
-    if (!exp.vendedor_nif) faltan.push('DNI del vendedor');
-    if (!exp.comprador_nombre) faltan.push('nombre del comprador');
-    if (!exp.comprador_nif) faltan.push('DNI del comprador');
-    if (!exp.precio_contrato) faltan.push('precio de contrato');
+    if (esContrato) {
+      if (!exp.vendedor_nombre) faltan.push('nombre del vendedor');
+      if (!exp.vendedor_nif) faltan.push('DNI del vendedor');
+      if (!exp.comprador_nombre) faltan.push('nombre del comprador');
+      if (!exp.comprador_nif) faltan.push('DNI del comprador');
+      if (!exp.precio_contrato) faltan.push('precio de contrato');
+    } else {
+      if (!exp.vendedor_nombre) faltan.push('nombre del vendedor');
+      if (!exp.comprador_nombre) faltan.push('nombre del comprador');
+      if (!exp.matricula) faltan.push('matrícula');
+      if (!T.leer(exp, 'fecha_venta')) faltan.push('fecha de venta');
+    }
 
     cont.innerHTML = `
       <div class="card" style="max-width:760px">
-        <div class="card-t">Contrato de compraventa pre-rellenado</div>
+        <div class="card-t">${h(titulo)}</div>
         <p class="t-muted" style="font-size:.85rem;margin-top:0">
-          Genera el contrato con los datos del expediente <span class="t-mono">${h(exp.referencia)}</span>,
+          Genera el documento con los datos del expediente <span class="t-mono">${h(exp.referencia)}</span>,
           listo para imprimir o guardar como PDF desde el navegador.
         </p>
 
@@ -960,32 +1088,34 @@
           <dt>Matrícula</dt><dd class="t-mono">${h(exp.matricula || '—')}</dd>
           <dt>Vendedor</dt><dd>${h(exp.vendedor_nombre || '—')}</dd>
           <dt>Comprador</dt><dd>${h(exp.comprador_nombre || '—')}</dd>
-          <dt>Precio</dt><dd>${eur(exp.precio_contrato)}</dd>
+          ${esContrato
+            ? `<dt>Precio</dt><dd>${eur(exp.precio_contrato)}</dd>`
+            : `<dt>Fecha de venta</dt><dd>${fecha(T.leer(exp, 'fecha_venta'))}</dd>`}
         </dl>
 
         ${faltan.length ? `<div class="regul-note" style="margin-bottom:16px">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>
-          <div>El contrato se generará con huecos en blanco. Faltan: <b>${h(faltan.join(', '))}</b>.</div>
+          ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
+          <div>El documento se generará con huecos en blanco. Faltan: <b>${h(faltan.join(', '))}</b>.</div>
         </div>` : ''}
 
         <div class="row-actions">
-          <button class="btn" id="btn-contrato">Generar contrato</button>
-          <button class="btn btn-ghost" id="btn-contrato-dl">Descargar .html</button>
+          <button class="btn" id="btn-generar">Generar ${esContrato ? 'contrato' : 'comunicación'}</button>
+          <button class="btn btn-ghost" id="btn-generar-dl">Descargar .html</button>
         </div>
 
         <p class="t-muted" style="font-size:.76rem;margin-bottom:0;margin-top:16px">
-          En la ventana del contrato, usa <b>Imprimir → Guardar como PDF</b> para obtener el archivo firmable.
+          En la ventana del documento, usa <b>Imprimir → Guardar como PDF</b> para obtener el archivo firmable.
         </p>
       </div>`;
 
-    cont.querySelector('#btn-contrato').addEventListener('click', () => {
-      const ok = GTContrato.abrir(exp);
+    cont.querySelector('#btn-generar').addEventListener('click', () => {
+      const ok = esContrato ? GTContrato.abrir(exp) : GTContrato.abrirComunicacion(exp);
       if (!ok) { toast('El navegador bloqueó la ventana. Usa "Descargar .html"', 'err'); return; }
-      toast('Contrato generado', 'ok');
+      toast('Documento generado', 'ok');
     });
-    cont.querySelector('#btn-contrato-dl').addEventListener('click', () => {
-      GTContrato.descargar(exp);
-      toast('Contrato descargado', 'ok');
+    cont.querySelector('#btn-generar-dl').addEventListener('click', () => {
+      esContrato ? GTContrato.descargar(exp) : GTContrato.descargarComunicacion(exp);
+      toast('Documento descargado', 'ok');
     });
   }
 
@@ -994,14 +1124,26 @@
      ============================================================ */
   async function vistaKanban() {
     loading('Cargando tablero…');
-    const expedientes = await GTApi.listarExpedientes();
+    const todos = await GTApi.listarExpedientes();
     const tactil = window.matchMedia('(pointer: coarse)').matches;
+    const expedientes = filtroTipo === 'todos' ? todos : todos.filter(e => e.tipo_tramite === filtroTipo);
 
     view.innerHTML = `
       ${cabecera()}
       <div class="page-head">
         <div><h1>Tablero de expedientes</h1><p>Arrastra las tarjetas para cambiar el estado del trámite</p></div>
         <button class="btn" id="btn-nuevo-exp">+ Nuevo expediente</button>
+      </div>
+
+      <div class="filtro-bar">
+        <span class="t-muted" style="font-size:.78rem">Filtrar por trámite</span>
+        <select id="filtro-tipo">
+          <option value="todos">Todos los trámites (${todos.length})</option>
+          ${window.GT_TRAMITES.map(tr => {
+            const n = todos.filter(e => e.tipo_tramite === tr.id).length;
+            return `<option value="${h(tr.id)}" ${filtroTipo === tr.id ? 'selected' : ''}>${h(tr.nombre)} (${n})</option>`;
+          }).join('')}
+        </select>
       </div>
 
       <div class="kanban" id="kanban">
@@ -1021,17 +1163,19 @@
       ${footer()}`;
 
     view.querySelector('#btn-nuevo-exp').addEventListener('click', () => (location.hash = '#/expedientes/nuevo'));
+    view.querySelector('#filtro-tipo').addEventListener('change', (e) => { filtroTipo = e.target.value; vistaKanban(); });
     activarDragDrop(view.querySelector('#kanban'));
   }
 
   function tarjetaKanban(e, tactil) {
+    const tr = T.tramite(e.tipo_tramite);
     return `<div class="kan-card" draggable="true" data-id="${h(e.id)}">
       <div class="kan-card-ref">${h(e.referencia)}</div>
-      <div class="kan-card-title">${h([e.marca, e.modelo].filter(Boolean).join(' ') || 'Sin vehículo')}</div>
+      <div class="kan-card-title">${h([e.marca, e.modelo].filter(Boolean).join(' ') || tr.nombre)}</div>
       <div class="kan-card-meta">${h(e.matricula || '—')} · ${h(nombreCliente(e.cliente))}</div>
       <div class="kan-card-foot">
-        <span class="t-muted">${fecha(e.created_at)}</span>
-        <b>${e.total_impuestos != null ? eur(e.total_impuestos) : '—'}</b>
+        <span class="badge badge-tramite" style="font-size:.62rem">${h(tr.corto)}</span>
+        ${tr.calculo === 'itp' && e.total_impuestos != null ? `<b>${eur(e.total_impuestos)}</b>` : `<span class="t-muted">${fecha(e.created_at)}</span>`}
       </div>
       ${tactil ? `<select class="tab" style="width:100%;margin-top:9px;padding:6px 9px;font-size:.74rem" data-mover="${h(e.id)}">
         ${window.GT_ESTADOS.map(s => `<option value="${h(s.id)}" ${s.id === e.estado ? 'selected' : ''}>${h(s.label)}</option>`).join('')}
@@ -1059,7 +1203,6 @@
       });
     });
 
-    // Cambio de estado en pantallas táctiles (donde no hay drag & drop nativo)
     kanban.querySelectorAll('[data-mover]').forEach(sel => {
       sel.addEventListener('change', async () => {
         try {
@@ -1089,7 +1232,6 @@
         const origen = card.closest('.kan-col');
         if (origen === col) return;
 
-        // Movimiento optimista: la tarjeta se coloca ya, y se revierte si falla.
         col.querySelector('.kan-list').appendChild(card);
         recontar(kanban);
 
@@ -1116,7 +1258,7 @@
      ============================================================ */
   function cabecera() {
     return `<button class="menu-toggle" id="menu-toggle" aria-label="Abrir menú" style="margin-bottom:14px">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      ${svg('<path d="M3 6h18M3 12h18M3 18h18"/>')}
     </button>`;
   }
 
@@ -1133,6 +1275,7 @@
     const [ruta, query] = hash.split('?');
     const partes = ruta.split('/').filter(Boolean);
     const seccion = partes[0] || 'dashboard';
+    const params = new URLSearchParams(query || '');
 
     document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.route === seccion));
     sidebar.classList.remove('open');
@@ -1144,8 +1287,7 @@
         partes[1] ? await vistaCliente(partes[1]) : await vistaClientes();
       } else if (seccion === 'expedientes') {
         if (partes[1] === 'nuevo') {
-          const pre = new URLSearchParams(query || '').get('cliente');
-          await vistaNuevoExpediente(pre);
+          await vistaNuevoExpediente(params.get('cliente'), params.get('tipo'));
         } else if (partes[1]) {
           await vistaExpediente(partes[1]);
         } else {

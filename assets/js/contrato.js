@@ -169,9 +169,125 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
   }
 
+  /* ============================================================
+     Comunicación de venta (trámite "Notificación de venta")
+     ============================================================ */
+
+  function construirComunicacion(exp) {
+    const hoy = fechaLarga(null);
+    const fechaVenta = fechaCorta(exp.datos && exp.datos.fecha_venta);
+
+    return '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">' +
+      '<title>Comunicación de venta · ' + esc(exp.referencia) + '</title>' +
+      '<style>' +
+      '@page{size:A4;margin:18mm 16mm}' +
+      'body{font-family:Georgia,"Times New Roman",serif;font-size:11.2pt;line-height:1.62;color:#111;max-width:800px;margin:0 auto;padding:26px}' +
+      'h1{font-size:15pt;text-align:center;margin:0 0 4px;letter-spacing:.4px}' +
+      '.sub{text-align:center;font-size:9.4pt;color:#555;margin-bottom:26px}' +
+      'h2{font-size:11.4pt;margin:24px 0 9px;border-bottom:1.4px solid #222;padding-bottom:4px;text-transform:uppercase;letter-spacing:.7px}' +
+      'p{margin:0 0 10px;text-align:justify}' +
+      'table{width:100%;border-collapse:collapse;margin:10px 0 4px}' +
+      'td{padding:6px 9px;border:1px solid #bbb;font-size:10.4pt;vertical-align:top}' +
+      'td.k{background:#f2f2f5;width:33%;font-weight:bold}' +
+      '.firmas{display:flex;gap:44px;margin-top:46px}' +
+      '.firma{flex:1;text-align:center;font-size:10pt}' +
+      '.firma .linea{border-top:1px solid #222;margin-top:56px;padding-top:6px}' +
+      '.pie{margin-top:34px;padding-top:11px;border-top:1px solid #ccc;font-size:8.3pt;color:#666;text-align:center}' +
+      '.aviso{margin-top:14px;padding:9px 12px;background:#fbf5e4;border:1px solid #e2cf9c;font-size:8.6pt;color:#6b5626}' +
+      '.wm{color:#7c4dff;font-weight:bold}' +
+      '@media print{.noprint{display:none}body{padding:0}}' +
+      '.noprint{position:fixed;top:14px;right:14px;display:flex;gap:9px}' +
+      '.noprint button{font-family:system-ui,sans-serif;font-size:13px;font-weight:600;padding:9px 17px;border-radius:8px;border:0;cursor:pointer;background:#7c4dff;color:#fff}' +
+      '.noprint button.sec{background:#fff;color:#333;border:1px solid #bbb}' +
+      '</style></head><body>' +
+
+      '<div class="noprint">' +
+      '<button onclick="window.print()">Imprimir / Guardar PDF</button>' +
+      '<button class="sec" onclick="window.close()">Cerrar</button>' +
+      '</div>' +
+
+      '<h1>Comunicación de Venta de Vehículo</h1>' +
+      '<div class="sub">Expediente ' + esc(exp.referencia) + ' · Documento generado el ' + hoy + '</div>' +
+
+      '<p>El abajo firmante, en calidad de <b>titular y transmitente</b> del vehículo que se ' +
+      'identifica, comunica que con fecha <b>' + fechaVenta + '</b> transmitió dicho vehículo a la ' +
+      'persona que igualmente se identifica, a los efectos de que deje de figurar a su nombre la ' +
+      'responsabilidad derivada de la tenencia y circulación del mismo.</p>' +
+
+      '<h2>I · Vehículo</h2>' +
+      '<table>' +
+      '<tr><td class="k">Marca y modelo</td><td>' + esc(exp.marca) + ' ' + esc(exp.modelo) + '</td></tr>' +
+      '<tr><td class="k">Matrícula</td><td>' + esc(exp.matricula) + '</td></tr>' +
+      '<tr><td class="k">Fecha de la venta</td><td>' + fechaVenta + '</td></tr>' +
+      '</table>' +
+
+      '<h2>II · Transmitente (vendedor)</h2>' +
+      '<table>' +
+      '<tr><td class="k">Nombre</td><td>' + esc(exp.vendedor_nombre) + '</td></tr>' +
+      '<tr><td class="k">DNI / NIF</td><td>' + esc(exp.vendedor_nif) + '</td></tr>' +
+      '<tr><td class="k">Domicilio</td><td>' + esc(exp.vendedor_direccion) + '</td></tr>' +
+      '<tr><td class="k">Teléfono</td><td>' + esc(exp.vendedor_telefono) + '</td></tr>' +
+      '</table>' +
+
+      '<h2>III · Adquirente (comprador)</h2>' +
+      '<table>' +
+      '<tr><td class="k">Nombre</td><td>' + esc(exp.comprador_nombre) + '</td></tr>' +
+      '<tr><td class="k">DNI / NIF</td><td>' + esc(exp.comprador_nif) + '</td></tr>' +
+      '<tr><td class="k">Domicilio</td><td>' + esc(exp.comprador_direccion) + '</td></tr>' +
+      '<tr><td class="k">Teléfono</td><td>' + esc(exp.comprador_telefono) + '</td></tr>' +
+      '</table>' +
+
+      '<h2>IV · Declaración</h2>' +
+      '<p>El transmitente declara que los datos consignados son ciertos y que el adquirente ha ' +
+      'recibido el vehículo junto con su documentación. A partir de la fecha de la venta indicada, ' +
+      'corresponden al adquirente las obligaciones y responsabilidades derivadas de la propiedad, ' +
+      'tenencia y circulación del vehículo, incluidas sanciones e impuestos.</p>' +
+
+      '<div class="firmas">' +
+      '<div class="firma"><div class="linea">EL TRANSMITENTE<br><small>' + esc(exp.vendedor_nombre) + '</small></div></div>' +
+      '<div class="firma"><div class="linea">EL ADQUIRENTE<br><small>' + esc(exp.comprador_nombre) + '</small></div></div>' +
+      '</div>' +
+
+      '<div class="aviso"><b>Aviso:</b> documento generado automáticamente por GestoTrafic a partir ' +
+      'de los datos del expediente. GestoTrafic <b>no lo presenta ante la DGT</b>: la gestoría ' +
+      'realiza la comunicación con el programa oficial de su colegio.</div>' +
+
+      '<div class="pie">Expediente ' + esc(exp.referencia) + ' · GestoTrafic · Documento de DEMOSTRACIÓN<br>' +
+      'Hecho por <span class="wm">WhiteMoon Agencia IA</span> · whitemoon.es</div>' +
+
+      '</body></html>';
+  }
+
+  function abrirEnPestana(html) {
+    const w = global.open('', '_blank');
+    if (!w) return false;
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    return true;
+  }
+
+  function descargarHTML(html, nombre) {
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = nombre;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+
   global.GTContrato = {
     abrir: abrirContrato,
     descargar: descargarContrato,
-    html: construirHTML
+    html: construirHTML,
+    abrirComunicacion: (exp) => abrirEnPestana(construirComunicacion(exp)),
+    descargarComunicacion: (exp) => descargarHTML(
+      construirComunicacion(exp),
+      'comunicacion-venta-' + (exp.referencia || 'expediente') + '.html'
+    ),
+    htmlComunicacion: construirComunicacion
   };
 })(window);

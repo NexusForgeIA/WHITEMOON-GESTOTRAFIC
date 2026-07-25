@@ -522,6 +522,75 @@ tbody tr.clickable:hover { background: rgba(124, 77, 255, .07); }
 .checklist-bar { height: 7px; background: rgba(255, 255, 255, .06); border-radius: 99px; overflow: hidden; margin: 10px 0 18px; }
 .checklist-fill { height: 100%; background: linear-gradient(90deg, var(--p), var(--g)); border-radius: 99px; transition: width .45s; }
 
+/* ---------------- Formularios generados por catálogo ---------------- */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(212px, 1fr));
+  gap: 0 14px;
+}
+.form-grid .field.full { grid-column: 1 / -1; }
+
+/* ---------------- Selector de tipo de trámite ---------------- */
+.tipo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(252px, 1fr));
+  gap: 13px;
+}
+.tipo-card {
+  display: flex;
+  gap: 13px;
+  text-align: left;
+  padding: 17px;
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  cursor: pointer;
+  color: var(--text);
+  font-family: inherit;
+  transition: transform .15s, border-color .15s, background .15s, box-shadow .15s;
+}
+.tipo-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(124, 77, 255, .5);
+  background: rgba(124, 77, 255, .07);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .3);
+}
+.tipo-card-ico {
+  width: 38px; height: 38px; flex-shrink: 0;
+  border-radius: 10px;
+  display: grid; place-items: center;
+  background: linear-gradient(135deg, rgba(124, 77, 255, .22), rgba(0, 212, 170, .12));
+  color: var(--p2);
+}
+.tipo-card-ico svg { width: 19px; height: 19px; }
+.tipo-card-txt { min-width: 0; }
+.tipo-card-txt strong { display: block; font-size: .88rem; line-height: 1.3; }
+.tipo-card-txt small { display: block; color: var(--muted); font-size: .74rem; margin-top: 5px; line-height: 1.5; }
+.tipo-card-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
+.tag {
+  font-size: .62rem; font-weight: 700; letter-spacing: .04em;
+  padding: 2px 8px; border-radius: 99px;
+  background: rgba(255, 255, 255, .06); color: var(--muted);
+}
+.tag.calc { background: rgba(0, 212, 170, .14); color: var(--g); }
+.tag.doc  { background: rgba(124, 77, 255, .16); color: var(--p2); }
+
+.badge-tramite { background: rgba(124, 77, 255, .13); color: var(--p2); }
+
+.filtro-bar { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+.filtro-bar select {
+  padding: 8px 13px;
+  background: rgba(8, 8, 16, .72);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: .82rem;
+  cursor: pointer;
+  outline: none;
+}
+.filtro-bar select:focus { border-color: rgba(124, 77, 255, .6); }
+.filtro-bar select option { background: #12121f; }
+
 /* ---------------- Utilidades ---------------- */
 .empty { text-align: center; padding: 46px 22px; color: var(--muted); }
 .empty svg { width: 40px; height: 40px; opacity: .34; margin-bottom: 12px; }
