@@ -43,8 +43,7 @@ window.GT_CCAA = [
   'Murcia', 'Navarra', 'País Vasco'
 ];
 
-window.GT_COMBUSTIBLES = ['Gasolina', 'Diésel', 'Híbrido', 'Híbrido enchufable', 'Eléctrico', 'GLP', 'GNC'];
-
+/* Etiquetas DGT · las usa el panel de cálculo ITP */
 window.GT_ETIQUETAS = [
   { id: '',    label: 'Sin etiqueta / no aplica' },
   { id: 'B',   label: 'B (amarilla)' },
@@ -53,13 +52,6 @@ window.GT_ETIQUETAS = [
   { id: '0',   label: '0 emisiones (azul)' }
 ];
 
-/* Checklist documental del trámite de transferencia */
-window.GT_DOCS_TRANSFERENCIA = [
-  { tipo: 'dni_comprador',       label: 'DNI / NIE del comprador',   obligatorio: true },
-  { tipo: 'dni_vendedor',        label: 'DNI / NIE del vendedor',    obligatorio: true },
-  { tipo: 'permiso_circulacion', label: 'Permiso de circulación',    obligatorio: true },
-  { tipo: 'ficha_tecnica',       label: 'Ficha técnica (ITV)',       obligatorio: true },
-  { tipo: 'contrato',            label: 'Contrato de compraventa',   obligatorio: true },
-  { tipo: 'itv',                 label: 'ITV en vigor',              obligatorio: false },
-  { tipo: 'otros',               label: 'Otros documentos',          obligatorio: false }
-];
+/* Los campos y el checklist documental de cada trámite viven en
+   assets/js/tramites.js (GT_TRAMITES). Añadir un trámite nuevo es
+   añadir una entrada allí: no hay que tocar formularios ni BD. */

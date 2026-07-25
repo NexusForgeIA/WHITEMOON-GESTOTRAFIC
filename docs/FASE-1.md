@@ -61,6 +61,10 @@ Trámite estrella: **transferencia de vehículo**. Datos del vehículo (marca,
 modelo, matrícula, fecha de matriculación, combustible, cilindrada, CVf, etiqueta
 DGT), datos de vendedor y comprador, y fiscalidad.
 
+> Desde la ampliación de trámites hay **7 tipos** (matriculación, notificación de
+> venta, bajas y duplicados). Cada uno declara sus campos y su checklist en el
+> catálogo: ver [`TRAMITES.md`](TRAMITES.md).
+
 Referencia automática `EXP-AAAA-NNNN` mediante secuencia de Postgres (sin
 triggers).
 
