@@ -1119,7 +1119,7 @@
           <div class="boe-buscador hidden" data-buscador-boe>
             <div class="boe-buscador-t">
               Precio medio del Anexo I
-              <span class="boe-sello">61.634 versiones</span>
+              <span class="boe-sello" data-contador-boe>cargando…</span>
             </div>
             <div class="form-grid">
               <div class="field">
@@ -1284,10 +1284,17 @@
     const selModelo = cont.querySelector('#f-boe-modelo');
     const selVer    = cont.querySelector('#f-boe-version');
     const fichaBoe  = cont.querySelector('[data-boe-ficha]');
+    const contadorBoe = cont.querySelector('[data-contador-boe]');
 
     let valorBaseId = null;     // fila del Anexo I fijada por el gestor
     let versiones = [];
-    let marcasPedidas = false;
+    let catalogoCargado = null; // tipo del BOE cuyas marcas ya están pedidas
+
+    /** 'turismo' o 'autocaravana', según el tipo elegido. */
+    function tipoBoe() {
+      const def = window.GT_TIPOS_VEHICULO.find(t => t.id === selTipo.value);
+      return (def && def.boe) || 'turismo';
+    }
 
     const norm = (s) => (s || '').toString().normalize('NFD')
       .replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
@@ -1298,15 +1305,30 @@
     }
 
     async function cargarMarcas() {
-      if (marcasPedidas) return;
-      marcasPedidas = true;
+      const tipo = tipoBoe();
+      if (catalogoCargado === tipo) return;
+      catalogoCargado = tipo;
+      // Al cambiar de turismo a autocaravana (o al revés) el catálogo entero
+      // es otro: se limpia lo elegido para no mezclar filas de los dos.
+      valorBaseId = null;
+      versiones = [];
+      selModelo.innerHTML = '<option value="">Elige marca</option>';
+      selModelo.disabled = true;
+      selVer.innerHTML = '<option value="">Elige modelo</option>';
+      selVer.disabled = true;
+      fichaBoe.innerHTML = '';
+      selMarca.innerHTML = '<option value="">Cargando…</option>';
       try {
-        const marcas = await GTApi.preciosMarcas();
+        const marcas = await GTApi.preciosMarcas(tipo);
+        if (catalogoCargado !== tipo) return;   // cambió de tipo mientras cargaba
         opciones(selMarca, marcas.map(m =>
           `<option value="${h(m.marca)}">${h(m.marca)} (${m.filas})</option>`).join(''),
           '— elige marca —');
+        const total = marcas.reduce((n, m) => n + Number(m.filas), 0);
+        contadorBoe.textContent = total.toLocaleString('es-ES') + ' versiones';
         proponerDesdeExpediente(marcas);
       } catch (err) {
+        catalogoCargado = null;
         selMarca.innerHTML = '<option value="">No se pudo cargar el Anexo I</option>';
         toast(err.message || 'No se pudo cargar el catálogo del Anexo I', 'err');
       }
@@ -1337,7 +1359,7 @@
       selModelo.innerHTML = '<option value="">Cargando…</option>';
       selModelo.disabled = true;
       try {
-        const modelos = await GTApi.preciosModelos(selMarca.value);
+        const modelos = await GTApi.preciosModelos(selMarca.value, tipoBoe());
         opciones(selModelo, modelos.map(x =>
           `<option value="${h(x.modelo)}">${h(x.modelo)} (${x.filas})</option>`).join(''),
           '— elige modelo —');
@@ -1368,7 +1390,8 @@
       selVer.disabled = true;
       try {
         versiones = await GTApi.preciosVersiones(
-          selMarca.value, selModelo.value, val(cont, 'fecha_matriculacion') || null);
+          selMarca.value, selModelo.value,
+          val(cont, 'fecha_matriculacion') || null, tipoBoe());
 
         const propuesta = versionSugerida ? mejorCandidata(versiones, versionSugerida) : null;
         opciones(selVer, versiones.map(v => {
@@ -1461,13 +1484,13 @@
 
     function sincronizarTipo() {
       const def = window.GT_TIPOS_VEHICULO.find(t => t.id === selTipo.value) || window.GT_TIPOS_VEHICULO[0];
-      const esTurismo = def.por === 'marca_modelo';
+      const porModelo = def.por === 'marca_modelo';
       campoKw.classList.toggle('hidden', def.por !== 'kw');
-      buscador.classList.toggle('hidden', !esTurismo);
+      buscador.classList.toggle('hidden', !porModelo);
 
       // El campo se bloquea cuando el valor lo pone la tabla: por tramo
       // (motos, quads, buggys) o por la versión que ha elegido el gestor.
-      const desdeTabla = def.auto || (esTurismo && valorBaseId);
+      const desdeTabla = def.auto || (porModelo && valorBaseId);
       inputBoe.readOnly = !!desdeTabla;
       campoBoe.classList.toggle('boe-auto', !!desdeTabla);
       selloBoe.classList.toggle('hidden', !desdeTabla);
@@ -1475,13 +1498,13 @@
       if (def.auto) {
         selloBoe.textContent = 'automático';
         inputBoe.placeholder = def.por === 'kw' ? 'lo calcula por kW' : 'lo calcula por cilindrada';
-      } else if (esTurismo && valorBaseId) {
+      } else if (porModelo && valorBaseId) {
         selloBoe.textContent = 'Anexo I · versión elegida';
       } else {
-        inputBoe.placeholder = esTurismo ? 'elige la versión o escríbelo' : '21000';
+        inputBoe.placeholder = porModelo ? 'elige la versión o escríbelo' : '21000';
       }
 
-      if (esTurismo) cargarMarcas();
+      if (porModelo) cargarMarcas();
     }
     selTipo.addEventListener('change', () => { valorBaseId = null; sincronizarTipo(); });
     sincronizarTipo();

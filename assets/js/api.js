@@ -215,23 +215,32 @@
      PostgREST no expone, y porque así el filtro por la Orden vigente vive en
      un único sitio del servidor. */
 
-  async function preciosMarcas() {
-    return unwrap(await sb.rpc('gestotrafic_precios_marcas'));
+  /* `tipo` es el tipo_vehiculo del BOE: 'turismo' o 'autocaravana'. Van
+     separados porque el Anexo IV los deprecia con tablas distintas. */
+
+  async function preciosMarcas(tipo) {
+    return unwrap(await sb.rpc('gestotrafic_precios_marcas', {
+      p_tipo_vehiculo: tipo || 'turismo'
+    }));
   }
 
-  async function preciosModelos(marca) {
-    return unwrap(await sb.rpc('gestotrafic_precios_modelos', { p_marca: marca }));
+  async function preciosModelos(marca, tipo) {
+    return unwrap(await sb.rpc('gestotrafic_precios_modelos', {
+      p_marca: marca,
+      p_tipo_vehiculo: tipo || 'turismo'
+    }));
   }
 
   /* Devuelve TODAS las versiones del modelo, no solo las que encajan con la
      fecha: `en_periodo` marca cuáles corresponden al año de matriculación.
      Si la fecha viene mal leída de la ficha, la versión correcta tiene que
      seguir estando en la lista. */
-  async function preciosVersiones(marca, modelo, fechaMatriculacion) {
+  async function preciosVersiones(marca, modelo, fechaMatriculacion, tipo) {
     return unwrap(await sb.rpc('gestotrafic_precios_versiones', {
       p_marca: marca,
       p_modelo: modelo,
-      p_fecha_matriculacion: fechaMatriculacion || null
+      p_fecha_matriculacion: fechaMatriculacion || null,
+      p_tipo_vehiculo: tipo || 'turismo'
     }));
   }
 

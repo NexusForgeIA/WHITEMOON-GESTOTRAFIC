@@ -55,13 +55,18 @@ window.GT_CCAA = [
    eléctricas): el motor resuelve el valor base solo y el campo manual sobra,
    por eso van con `auto: true`.
 
-   El turismo se tarifa por marca/modelo/versión sobre las 61.634 filas del
-   Anexo I. NO lleva `auto: true` a propósito: el valor base solo se rellena
-   cuando el gestor elige una versión concreta en el desplegable, y mientras
-   tanto el campo sigue editable a mano. Dos versiones del mismo modelo pueden
-   diferir en más de mil euros, así que esa elección no se automatiza. */
+   Turismos (61.634 filas) y autocaravanas (9.252) se tarifan por
+   marca/modelo/versión. NO llevan `auto: true` a propósito: el valor base solo
+   se rellena cuando el gestor elige una versión concreta en el desplegable, y
+   mientras tanto el campo sigue editable a mano. Dos versiones del mismo
+   modelo pueden diferir en más de mil euros, así que no se automatiza.
+
+   `boe` es el `tipo_vehiculo` con el que están cargadas sus filas. Turismo y
+   autocaravana NO son intercambiables: el Anexo IV les aplica tablas de
+   depreciación distintas, así que cada uno busca solo entre las suyas. */
 window.GT_TIPOS_VEHICULO = [
-  { id: 'coche',          label: 'Turismo',          auto: false, por: 'marca_modelo' },
+  { id: 'coche',          label: 'Turismo',          auto: false, por: 'marca_modelo', boe: 'turismo' },
+  { id: 'autocaravana',   label: 'Autocaravana',     auto: false, por: 'marca_modelo', boe: 'autocaravana' },
   { id: 'moto',           label: 'Motocicleta',      auto: true,  por: 'cilindrada' },
   { id: 'moto_electrica', label: 'Moto eléctrica',   auto: true,  por: 'kw' },
   { id: 'quad',           label: 'Quad',             auto: true,  por: 'cilindrada' },

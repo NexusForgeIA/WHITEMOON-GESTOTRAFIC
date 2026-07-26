@@ -46,8 +46,9 @@ function saca(re, nombre) {
   return m[0];
 }
 
-const P = new Function('tablaAutocaravanas', 'tablaEmbarcaciones', [
+const P = new Function('tablaEmbarcaciones', [
   saca(/const tablaTurismos = \[[\s\S]*?\];/, 'tablaTurismos'),
+  saca(/const tablaAutocaravanas = \[[\s\S]*?\];/, 'tablaAutocaravanas'),
   saca(/const ccaaData = \{[\s\S]*?\n\};/, 'ccaaData'),
   saca(/const valencianaCuotas = \{[\s\S]*?\n\};/, 'valencianaCuotas'),
   saca(/function aniosUso\([\s\S]*?\n\}/, 'aniosUso'),
@@ -57,12 +58,22 @@ const P = new Function('tablaAutocaravanas', 'tablaEmbarcaciones', [
   saca(/function calcularTipoNormal\([\s\S]*?\n\}/, 'calcularTipoNormal'),
 ].join('\n') + `
   return { ccaaData, aniosUso, buscarPctDepreciacion, cuotaFijaValenciana,
-           cuotaFijaEstandar, calcularTipoNormal };`)([], []);
+           cuotaFijaEstandar, calcularTipoNormal };`)([]);
+
+/* Tipo del CRM -> tipo de la calculadora de producción. Importa: decide qué
+   tabla del Anexo IV se aplica y si entra la cuota fija valenciana. */
+const TIPO_CALC = {
+  coche: 'turismo-coche', turismo: 'turismo-coche',
+  moto: 'turismo-moto', moto_electrica: 'turismo-moto',
+  quad: 'turismo-quad', buggy: 'turismo-quad',
+  autocaravana: 'autocaravana'
+};
 
 /* Secuencia de cálculo copiada de calcular() en el index.html de producción. */
-function calculadoraProduccion(v, esMoto) {
+function calculadoraProduccion(v, tipoCrm) {
+  const tipo = TIPO_CALC[tipoCrm || 'coche'] || 'turismo-coche';
   const anos = P.aniosUso(v.fecha_matriculacion, v.fecha_transmision);
-  const pct = P.buscarPctDepreciacion('turismo-coche', anos);
+  const pct = P.buscarPctDepreciacion(tipo, anos);
   const p = P.ccaaData[v.ccaa];
   if (!p) throw new Error('CCAA desconocida en la calculadora: ' + v.ccaa);
 
@@ -74,7 +85,11 @@ function calculadoraProduccion(v, esMoto) {
   if (p.exA > 0 && anos >= p.exA && v.valor_boe < p.exV) {
     itp = 0;
   } else if (v.ccaa === 'Comunidad Valenciana') {
-    const cf = P.cuotaFijaValenciana(anos, v.cilindrada, baseImponible, !!esMoto);
+    // Producción solo aplica la cuota fija valenciana a coches y motos.
+    const aplica = tipo === 'turismo-coche' || tipo === 'turismo-moto';
+    const cf = aplica
+      ? P.cuotaFijaValenciana(anos, v.cilindrada, baseImponible, tipo === 'turismo-moto')
+      : null;
     itp = cf ? cf.cuota : P.calcularTipoNormal(p, v.etiqueta_dgt, v.cvf, baseImponible).itp;
   } else if (p.cA > 0 && anos >= p.cA) {
     const cuota = P.cuotaFijaEstandar(p, anos, v.cilindrada);
@@ -95,10 +110,10 @@ const CASOS = [
   { n: 'REF · turismo 2019, base manual 19.800, contrato 8.600', base: 19800,
     p: { tipo_vehiculo:'coche', valor_boe:19800, precio_contrato:8600,
          fecha_matriculacion:'2019-03-15', ccaa:'Comunidad de Madrid' } },
-  { n: 'REF · moto 600 cc 2018, base por tramo', base: 6700, esMoto: true,
+  { n: 'REF · moto 600 cc 2018, base por tramo', base: 6700,
     p: { tipo_vehiculo:'moto', cilindrada:600, fecha_matriculacion:'2018-04-19',
          ccaa:'Comunidad de Madrid' } },
-  { n: 'REF · moto eléctrica 11 kW 2022, base por tramo', base: 4500, esMoto: true,
+  { n: 'REF · moto eléctrica 11 kW 2022, base por tramo', base: 4500,
     p: { tipo_vehiculo:'moto_electrica', potencia_kw:11,
          fecha_matriculacion:'2022-05-10', ccaa:'Comunidad de Madrid' } },
 
@@ -141,7 +156,36 @@ const CASOS = [
          ccaa:'Baleares', cilindrada:1600, cvf:9.0, etiqueta_dgt:'ECO' } },
   { n: 'Rama · Madrid, uso especial (taxi) al 70%', base: 18000,
     p: { tipo_vehiculo:'coche', valor_boe:18000, fecha_matriculacion:'2020-02-01',
-         ccaa:'Comunidad de Madrid', cilindrada:1600, cvf:9.0, uso_especial:true } }
+         ccaa:'Comunidad de Madrid', cilindrada:1600, cvf:9.0, uso_especial:true } },
+
+  /* --- Autocaravanas: MISMA busqueda que los turismos, OTRA depreciacion.
+     Con la tabla general estos casos saldrian mucho mas baratos, asi que
+     valen para detectar que se aplica la tabla equivocada. --- */
+  { n: 'Autocaravana · BENIMAR Sport Up 340 (2019), Madrid', base: 75200,
+    p: { tipo_vehiculo:'autocaravana', marca:'BENIMAR', modelo:'SPORT',
+         version:'SPORT UP 340.', fecha_matriculacion:'2019-05-20',
+         ccaa:'Comunidad de Madrid', cilindrada:1995, cvf:13.30 } },
+  { n: 'Autocaravana · AHORN Maple AC Alcove 690 (2022), Cataluña', base: 64900,
+    p: { tipo_vehiculo:'autocaravana', marca:'AHORN', modelo:'MAPLE',
+         version:'MAPLE AC ALCOVE 690.', fecha_matriculacion:'2022-03-10',
+         ccaa:'Cataluña', cilindrada:2300, cvf:14.48 } },
+  { n: 'Autocaravana · VW California (2009), 17 años: tramo que no existe en turismos',
+    base: 66300,
+    p: { tipo_vehiculo:'autocaravana', valor_base_id:'b2762ea9-490a-4e65-8d68-009497895c9e',
+         fecha_matriculacion:'2009-06-01', ccaa:'Comunidad de Madrid',
+         cilindrada:1968, cvf:13.20 } },
+  { n: 'Autocaravana · tope de la tabla (>18 años)', base: 40000,
+    p: { tipo_vehiculo:'autocaravana', valor_boe:40000, fecha_matriculacion:'2004-01-10',
+         ccaa:'Comunidad de Madrid', cilindrada:2500, cvf:14.0 } },
+  { n: 'Autocaravana · C. Valenciana: NO lleva cuota fija', base: 19000,
+    p: { tipo_vehiculo:'autocaravana', valor_boe:19000, fecha_matriculacion:'2016-06-01',
+         ccaa:'Comunidad Valenciana', cilindrada:2300, cvf:14.0 } },
+
+  /* Quad en la Comunitat Valenciana: producción tampoco le aplica la cuota
+     fija de coches. Estaba mal en el motor antes de cargar las autocaravanas. */
+  { n: 'Quad · C. Valenciana: tipo general, no cuota fija de coche', base: 6000,
+    p: { tipo_vehiculo:'quad', valor_boe:6000, fecha_matriculacion:'2018-06-01',
+         ccaa:'Comunidad Valenciana', cilindrada:500 } }
 ];
 
 async function motor(payload) {
@@ -170,9 +214,12 @@ async function motor(payload) {
       ccaa: c.p.ccaa, cilindrada: c.p.cilindrada || 0, cvf: c.p.cvf || 0,
       etiqueta_dgt: c.p.etiqueta_dgt || '', precio_contrato: c.p.precio_contrato || 0,
       uso_especial: !!c.p.uso_especial
-    }, c.esMoto);
+    }, c.p.tipo_vehiculo);
 
+    // La tabla del Anexo IV que dice haber usado tiene que ser la que toca.
+    const tablaEsperada = c.p.tipo_vehiculo === 'autocaravana' ? 'autocaravanas' : 'general';
     const ok = r.detalle.valor_boe === c.base
+            && r.detalle.tabla_depreciacion === tablaEsperada
             && r.valor_venal === esp.valor_venal
             && r.base_imponible === esp.base_imponible
             && r.itp === esp.itp;
@@ -180,6 +227,8 @@ async function motor(payload) {
     filas.push({
       caso: c.n,
       'base Anexo I': r.detalle.valor_boe === c.base ? String(c.base) : `${r.detalle.valor_boe} ≠ ${c.base}`,
+      'Anexo IV': r.detalle.tabla_depreciacion === tablaEsperada
+        ? r.detalle.tabla_depreciacion : `${r.detalle.tabla_depreciacion} ≠ ${tablaEsperada}`,
       origen: r.detalle.valor_base_origen,
       'venal calc/motor': `${esp.valor_venal} / ${r.valor_venal}`,
       'base calc/motor': `${esp.base_imponible} / ${r.base_imponible}`,

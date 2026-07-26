@@ -9,10 +9,15 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
  *
  * FUENTE: motor de producción de whitemoon.es/calculadora-itp/
  * (BOE 2026 · Orden HAC/1501/2025). Tablas y reglas reutilizadas
- * VERBATIM: tabla de depreciación Anexo IV, tipos autonómicos,
- * cuotas fijas, exenciones, etiqueta DGT 0/ECO y >15 CVf.
+ * VERBATIM: las DOS tablas de depreciación del Anexo IV (la general
+ * y la de autocaravanas), tipos autonómicos, cuotas fijas,
+ * exenciones, etiqueta DGT 0/ECO y >15 CVf.
  * No se reinventa el cálculo: sólo se envuelve en un contrato
  * de entrada/salida JSON para el CRM.
+ *
+ * OJO con el tipo de vehículo: decide qué tabla del Anexo IV se
+ * aplica. Una autocaravana depreciada con la tabla general liquida
+ * de menos (a los 5 años, 59 % frente a 39 %).
  *
  * VALOR BASE (Anexo I)
  * Se puede pasar `valor_boe` a mano, como siempre, o dejar que el
@@ -42,6 +47,32 @@ const tablaTurismos: [number, number, string][] = [
   [10, 0.17, "Más de 10 años, hasta 11"], [11, 0.13, "Más de 11 años, hasta 12"],
   [12, 0.10, "Más de 12 años"]
 ];
+
+// --- Anexo IV BOE: depreciación de autocaravanas, campers y vehículos
+// vivienda. Es una tabla DISTINTA de la anterior: 19 tramos (hasta "más de
+// 18 años") y baja mucho más despacio — a los 5 años conserva el 59 % frente
+// al 39 % de un turismo. Aplicarles la de turismos liquidaría de menos.
+const tablaAutocaravanas: [number, number, string][] = [
+  [0, 1.00, "Hasta 1 año"], [1, 0.87, "Más de 1 año, hasta 2"],
+  [2, 0.77, "Más de 2 años, hasta 3"], [3, 0.71, "Más de 3 años, hasta 4"],
+  [4, 0.65, "Más de 4 años, hasta 5"], [5, 0.59, "Más de 5 años, hasta 6"],
+  [6, 0.53, "Más de 6 años, hasta 7"], [7, 0.48, "Más de 7 años, hasta 8"],
+  [8, 0.43, "Más de 8 años, hasta 9"], [9, 0.38, "Más de 9 años, hasta 10"],
+  [10, 0.33, "Más de 10 años, hasta 11"], [11, 0.29, "Más de 11 años, hasta 12"],
+  [12, 0.25, "Más de 12 años, hasta 13"], [13, 0.22, "Más de 13 años, hasta 14"],
+  [14, 0.19, "Más de 14 años, hasta 15"], [15, 0.16, "Más de 15 años, hasta 16"],
+  [16, 0.14, "Más de 16 años, hasta 17"], [17, 0.12, "Más de 17 años, hasta 18"],
+  [18, 0.10, "Más de 18 años"]
+];
+
+const esAutocaravana = (tipo: string) => tipo === "autocaravana";
+
+/** Tabla del Anexo IV y tope de tramos que le corresponden al vehículo. */
+function tablaDepreciacion(tipo: string): { tabla: [number, number, string][]; tope: number } {
+  return esAutocaravana(tipo)
+    ? { tabla: tablaAutocaravanas, tope: 18 }
+    : { tabla: tablaTurismos, tope: 12 };
+}
 
 // --- Parámetros autonómicos ---
 // tg=tipo general · t15=tipo >15 CVf · t0=etiqueta 0 · teco=etiqueta ECO
@@ -91,10 +122,11 @@ function aniosUso(fechaMat: string, fechaTrans: string): number | null {
   return anos;
 }
 
-function tramoTexto(anos: number | null): string {
+function tramoTexto(anos: number | null, tipo: string): string {
   if (anos === null) return "—";
+  const tope = tablaDepreciacion(tipo).tope;
   if (anos < 1) return "Hasta 1 año";
-  if (anos >= 12) return "Más de 12 años";
+  if (anos >= tope) return `Más de ${tope} años`;
   return `Más de ${anos} años, hasta ${anos + 1}`;
 }
 
@@ -145,9 +177,9 @@ async function buscarValorBase(input: Record<string, unknown>): Promise<{ valor:
   const sb = createClient(url, key, { auth: { persistSession: false } });
   const tipo = String(input.tipo_vehiculo ?? "coche");
 
-  // Turismos: por la fila exacta que haya fijado el gestor, o si no por
-  // marca / modelo / versión.
-  if (tipo === "coche" || tipo === "turismo") {
+  // Turismos y autocaravanas: por la fila exacta que haya fijado el gestor,
+  // o si no por marca / modelo / versión.
+  if (tipo === "coche" || tipo === "turismo" || tipo === "autocaravana") {
     const filaId = input.valor_base_id ? String(input.valor_base_id) : null;
     if (!filaId && (!input.marca || !input.modelo)) return { valor: null, meta: null };
     const { data, error } = await sb.rpc("gestotrafic_buscar_valor_base", {
@@ -155,7 +187,10 @@ async function buscarValorBase(input: Record<string, unknown>): Promise<{ valor:
       p_modelo: input.modelo ? String(input.modelo) : null,
       p_version: input.version ? String(input.version) : null,
       p_fecha_matriculacion: input.fecha_matriculacion ? String(input.fecha_matriculacion) : null,
-      p_id: filaId
+      p_id: filaId,
+      // El tipo forma parte de la búsqueda: una fila de autocaravana pedida
+      // como turismo no debe aparecer, porque se depreciaría con otra tabla.
+      p_tipo_vehiculo: esAutocaravana(tipo) ? "autocaravana" : "turismo"
     });
     if (error || !Array.isArray(data) || !data.length) return { valor: null, meta: null };
 
@@ -191,7 +226,11 @@ async function calcularItp(input: Record<string, unknown>) {
   const etiqueta       = String(input.etiqueta_dgt ?? "");
   const usoEsp         = input.uso_especial === true;
   const precioContrato = Number(input.precio_contrato) || 0;
-  const esMoto         = String(input.tipo_vehiculo ?? "coche") === "moto";
+  const tipoVehiculo   = String(input.tipo_vehiculo ?? "coche");
+  const esMoto         = tipoVehiculo === "moto";
+  // La cuota fija valenciana solo la contempla la calculadora de producción
+  // para coches y motos; quads, buggys y autocaravanas van al tipo general.
+  const cuotaCvAplica  = esMoto || tipoVehiculo === "coche" || tipoVehiculo === "turismo";
 
   const p = ccaaData[ccaaName];
   if (!p) return { error: `CCAA no reconocida: ${ccaaName}`, ccaa_validas: Object.keys(ccaaData) };
@@ -226,7 +265,8 @@ async function calcularItp(input: Record<string, unknown>) {
     };
   }
 
-  const fila = tablaTurismos.find((r) => r[0] === Math.min(anos, 12))!;
+  const { tabla, tope } = tablaDepreciacion(tipoVehiculo);
+  const fila = tabla.find((r) => r[0] === Math.min(anos, tope))!;
   const pctDep = fila[1];
   const coefUso = usoEsp ? 0.7 : 1;
 
@@ -252,7 +292,7 @@ async function calcularItp(input: Record<string, unknown>) {
     regimen = "exento";
     nota = `Exento en ${ccaaName}: antigüedad ≥${p.exA} años y valor original <${p.exV} €.`;
   } else if (ccaaName === "Comunidad Valenciana") {
-    const cf = cuotaFijaValenciana(anos, cilindrada, baseImponible, esMoto);
+    const cf = cuotaCvAplica ? cuotaFijaValenciana(anos, cilindrada, baseImponible, esMoto) : null;
     if (cf) {
       itp = cf.cuota; tipoAplicable = "Cuota fija"; regimen = "cuota_fija";
       nota = `Cuota fija autonómica (${cf.esMoto ? "moto" : "coche"}, ${cf.tramoAnt} años, ${cilindrada} cc).`;
@@ -287,7 +327,8 @@ async function calcularItp(input: Record<string, unknown>) {
     detalle: {
       ccaa: ccaaName,
       anios_uso: anos,
-      tramo: tramoTexto(anos),
+      tramo: tramoTexto(anos, tipoVehiculo),
+      tabla_depreciacion: esAutocaravana(tipoVehiculo) ? "autocaravanas" : "general",
       pct_depreciacion: pctDep,
       valor_boe: valorBoe,
       valor_base_origen: valorBase.origen,
