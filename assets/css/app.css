@@ -90,18 +90,35 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; }
   padding: 38px 34px 30px;
   box-shadow: var(--shadow);
 }
+/* El logo manda en el login: va centrado y encima del formulario, con el
+   nombre del producto debajo. */
 .login-logo {
-  display: flex; align-items: center; gap: 11px;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  text-align: center;
   margin-bottom: 26px;
 }
-.login-logo-mark {
-  width: 40px; height: 40px; flex-shrink: 0;
-  border-radius: 11px;
-  background: linear-gradient(135deg, var(--p), var(--p2));
-  display: grid; place-items: center;
-  box-shadow: 0 6px 18px rgba(124, 77, 255, .38);
+.login-logo-img {
+  width: 100%;
+  max-width: 220px;
+  height: auto;          /* respeta la relación de aspecto del archivo */
+  display: block;
 }
-.login-logo-mark svg { width: 22px; height: 22px; stroke: #fff; }
+/* El logo añade altura a una tarjeta que antes entraba justa, así que se
+   escala con el alto de la ventana. En portátiles de 768 px el login sigue
+   cabiendo entero; por debajo de 680 px (móviles pequeños, apaisado) se
+   encoge más y la página desplaza un poco, que es el comportamiento normal
+   de un formulario largo: no se recorta ni se solapa nada.
+   No se oculta el nombre del producto: el logotipo es de la agencia
+   (WhiteMoon) y «GestoTrafic» es lo que el gestor busca al entrar. */
+@media (max-height: 780px) {
+  .login-logo-img { max-width: 150px; }
+  .login-logo { gap: 9px; margin-bottom: 18px; }
+}
+@media (max-height: 680px) {
+  .login-logo-img { max-width: 118px; }
+  .login-logo { margin-bottom: 14px; }
+}
+
 .login-logo-txt strong { display: block; font-size: 1.14rem; letter-spacing: -.03em; }
 .login-logo-txt small { color: var(--muted); font-size: .7rem; letter-spacing: .04em; }
 
@@ -222,8 +239,13 @@ select option:checked { background: #241a4d; color: #fff; font-weight: 600; }
   border-bottom: 1px solid var(--border-2);
   margin-bottom: 16px;
 }
-.sidebar-logo .login-logo-mark { width: 34px; height: 34px; border-radius: 9px; }
-.sidebar-logo .login-logo-mark svg { width: 18px; height: 18px; }
+/* Alto fijo y ancho automático: la marca se ajusta a la cabecera sin
+   descuadrar la fila ni deformarse. */
+.sidebar-logo-img {
+  height: 36px; width: auto;
+  flex-shrink: 0;
+  display: block;
+}
 .sidebar-logo strong { font-size: 1rem; letter-spacing: -.03em; }
 .sidebar-logo small { display: block; color: var(--muted); font-size: .62rem; letter-spacing: .05em; }
 
