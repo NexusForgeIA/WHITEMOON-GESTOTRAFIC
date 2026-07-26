@@ -29,6 +29,11 @@ Todo vive bajo el prefijo `gestotrafic_*`. La única referencia fuera de él es
 | 15 | `gestotrafic_precios_medios_autocaravana` | Admite `tipo_vehiculo = 'autocaravana'`; la restricción de identificación y los índices pasan a distinguir «tarifa por modelo» de «tarifa por tramo» |
 | 16 | `gestotrafic_valor_base_por_tipo` | La búsqueda lleva `p_tipo_vehiculo`: un id de autocaravana pedido como turismo devuelve `sin_match` en vez de calcular con otra depreciación |
 | 17 | `gestotrafic_precios_catalogo_por_tipo` | Las tres funciones de catálogo aceptan el tipo, para que cada buscador vea solo sus filas |
+| 18 | `gestotrafic_buscar_expedientes` | Búsqueda por matrícula o DNI/NIF/CIF + `gestotrafic_normalizar_busqueda` e índice por la forma normalizada |
+
+> La 18 es **SECURITY INVOKER a propósito** (no lleva `SECURITY DEFINER`): así el
+> filtrado por gestor lo hace el RLS de `gestotrafic_expedientes` y no una copia
+> de la regla dentro de la función, que podría desincronizarse.
 
 ## Carga de las filas del Anexo I
 

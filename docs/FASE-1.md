@@ -78,6 +78,22 @@ DGT), datos de vendedor y comprador, y fiscalidad.
 Referencia automática `EXP-AAAA-NNNN` mediante secuencia de Postgres (sin
 triggers).
 
+**Buscador por matrícula o documento.** Un solo campo con lupa, encima del
+listado: detecta si le das una matrícula o un DNI/NIF/CIF y busca por los dos.
+El término se normaliza —mayúsculas y solo alfanuméricos—, así que `4821 NBH`,
+`4821-NBH` y `4821nbh` son lo mismo, y `71.640.935-D` encuentra a `71640935D`.
+Busca en las columnas (`matricula`, los `*_nif`, el NIF del cliente) y también
+dentro del jsonb `datos`, bajo claves de matrícula o de documento, porque no
+todos los trámites tienen columna propia.
+
+La búsqueda es enlazable: `#/expedientes?q=4821NBH`.
+
+> La resuelve `gestotrafic_buscar_expedientes`, que es **SECURITY INVOKER a
+> propósito**: se ejecuta con los permisos de quien llama, así que el filtrado
+> por gestor lo hace el **RLS de siempre** y no una segunda copia de la regla.
+> Un gestor solo encuentra los suyos; el admin, todos. Comprobado con un NIF que
+> aparece en expedientes de dos gestores distintos: cada uno ve solo el suyo.
+
 Estados en tablero Kanban con drag & drop nativo HTML5:
 
 ```

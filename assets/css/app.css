@@ -614,6 +614,46 @@ tbody tr.clickable:hover { background: rgba(124, 77, 255, .07); }
 
 .badge-tramite { background: rgba(124, 77, 255, .13); color: var(--p2); }
 
+/* ---------------- Buscador de expedientes ---------------- */
+.buscador-exp {
+  position: relative;
+  display: flex; align-items: center;
+  margin-bottom: 14px;
+}
+.buscador-exp .lupa {
+  position: absolute; left: 14px;
+  width: 17px; height: 17px;
+  color: var(--muted); pointer-events: none;
+}
+.buscador-exp input {
+  width: 100%;
+  padding: 12px 42px 12px 41px;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, .1);
+  background: rgba(255, 255, 255, .03);
+  color: var(--text);
+  font-size: .88rem; font-family: inherit;
+  transition: border-color .15s, background .15s;
+}
+.buscador-exp input::placeholder { color: var(--muted); }
+.buscador-exp input:focus {
+  outline: none;
+  border-color: rgba(124, 77, 255, .55);
+  background: rgba(124, 77, 255, .05);
+}
+/* La X nativa de <input type=search> desentona con el resto del panel. */
+.buscador-exp input::-webkit-search-cancel-button { display: none; }
+.btn-limpiar {
+  position: absolute; right: 8px;
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0;
+  border: 0; border-radius: 8px;
+  background: transparent; color: var(--muted);
+  cursor: pointer;
+}
+.btn-limpiar:hover { background: rgba(255, 255, 255, .07); color: var(--text); }
+.btn-limpiar svg { width: 15px; height: 15px; }
+
 .filtro-bar { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
 .filtro-bar select {
   padding: 8px 13px;
