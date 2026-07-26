@@ -1082,6 +1082,262 @@
     });
   }
 
+  /* ============================================================
+     Buscador del Anexo I · marca → modelo → versión
+     ------------------------------------------------------------
+     Lo usan el panel ITP del expediente y la calculadora suelta.
+     Está aquí y no duplicado en cada uno porque la regla que
+     implementa es delicada: el BOE no descompone el modelo —
+     publica una sola cadena «Modelo-Tipo» por fila—, así que
+     `modelo` es solo un agrupador para no listar 61.634 opciones
+     de golpe. La identidad fiscal es la VERSIÓN, y la elige una
+     persona: mientras no lo haga, el valor base sigue siendo un
+     campo manual.
+
+     El catálogo se pide por RPC (`gestotrafic_precios_*`), que
+     solo tienen `execute` para `authenticated` y devuelven listas
+     agregadas. La tabla entera no baja nunca al navegador.
+     ============================================================ */
+
+  function htmlBuscadorBoe(oculto) {
+    return `
+      <div class="boe-buscador${oculto ? ' hidden' : ''}" data-buscador-boe>
+        <div class="boe-buscador-t">
+          Precio medio del Anexo I
+          <span class="boe-sello" data-contador-boe>cargando…</span>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label for="f-boe-marca">Marca</label>
+            <select id="f-boe-marca"><option value="">Cargando…</option></select>
+          </div>
+          <div class="field">
+            <label for="f-boe-modelo">Modelo</label>
+            <select id="f-boe-modelo" disabled><option value="">Elige marca</option></select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="f-boe-version">Versión <span class="t-muted" style="font-weight:400">· la elige el gestor</span></label>
+          <select id="f-boe-version" disabled><option value="">Elige modelo</option></select>
+        </div>
+        <div class="boe-ficha" data-boe-ficha></div>
+      </div>`;
+  }
+
+  /**
+   * @param o.raiz       elemento que contiene el HTML de htmlBuscadorBoe()
+   * @param o.tipoBoe    () => 'turismo' | 'autocaravana'
+   * @param o.fechaMat   () => 'AAAA-MM-DD' | null · solo marca las versiones
+   *                     fuera de periodo, no las esconde
+   * @param o.sugerencia { marca, modelo } de Gest-IA, o null
+   * @param o.onCambio   (fila|null) cada vez que cambia la versión elegida
+   */
+  function crearBuscadorBoe(o) {
+    const cont      = o.raiz;
+    const selMarca  = cont.querySelector('#f-boe-marca');
+    const selModelo = cont.querySelector('#f-boe-modelo');
+    const selVer    = cont.querySelector('#f-boe-version');
+    const fichaBoe  = cont.querySelector('[data-boe-ficha]');
+    const contador  = cont.querySelector('[data-contador-boe]');
+
+    let versiones = [];
+    let catalogoCargado = null;   // tipo del BOE cuyas marcas ya están pedidas
+    let elegida = null;
+
+    const norm = (s) => (s || '').toString().normalize('NFD')
+      .replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+
+    function opciones(sel, lista, textoVacio) {
+      sel.innerHTML = `<option value="">${h(textoVacio)}</option>` + lista;
+      sel.disabled = false;
+    }
+
+    function avisar() { if (o.onCambio) o.onCambio(elegida); }
+
+    async function cargarMarcas() {
+      const tipo = o.tipoBoe();
+      if (catalogoCargado === tipo) return;
+      catalogoCargado = tipo;
+      // Al cambiar de turismo a autocaravana (o al revés) el catálogo entero
+      // es otro: se limpia lo elegido para no mezclar filas de los dos.
+      elegida = null;
+      versiones = [];
+      selModelo.innerHTML = '<option value="">Elige marca</option>';
+      selModelo.disabled = true;
+      selVer.innerHTML = '<option value="">Elige modelo</option>';
+      selVer.disabled = true;
+      fichaBoe.innerHTML = '';
+      selMarca.innerHTML = '<option value="">Cargando…</option>';
+      avisar();
+      try {
+        const marcas = await GTApi.preciosMarcas(tipo);
+        if (catalogoCargado !== tipo) return;   // cambió de tipo mientras cargaba
+        opciones(selMarca, marcas.map(m =>
+          `<option value="${h(m.marca)}">${h(m.marca)} (${m.filas})</option>`).join(''),
+          '— elige marca —');
+        contador.textContent =
+          marcas.reduce((n, m) => n + Number(m.filas), 0).toLocaleString('es-ES') + ' versiones';
+        proponer(marcas);
+      } catch (err) {
+        catalogoCargado = null;
+        selMarca.innerHTML = '<option value="">No se pudo cargar el Anexo I</option>';
+        toast(err.message || 'No se pudo cargar el catálogo del Anexo I', 'err');
+      }
+    }
+
+    /* Gest-IA propone; no decide. Se preseleccionan marca y modelo —que solo
+       sirven para navegar— y la versión se deja SIN elegir: es la que fija el
+       precio, así que la confirma una persona. */
+    function proponer(marcas) {
+      const sug = o.sugerencia && o.sugerencia();
+      if (!sug || !sug.marca) return;
+      const m = marcas.find(x => norm(x.marca) === norm(sug.marca));
+      if (!m) return;
+      selMarca.value = m.marca;
+      cargarModelos(sug.modelo);
+    }
+
+    async function cargarModelos(modeloSugerido) {
+      elegida = null;
+      selVer.innerHTML = '<option value="">Elige modelo</option>';
+      selVer.disabled = true;
+      fichaBoe.innerHTML = '';
+      if (!selMarca.value) {
+        selModelo.innerHTML = '<option value="">Elige marca</option>';
+        selModelo.disabled = true;
+        return avisar();
+      }
+      selModelo.innerHTML = '<option value="">Cargando…</option>';
+      selModelo.disabled = true;
+      try {
+        const modelos = await GTApi.preciosModelos(selMarca.value, o.tipoBoe());
+        opciones(selModelo, modelos.map(x =>
+          `<option value="${h(x.modelo)}">${h(x.modelo)} (${x.filas})</option>`).join(''),
+          '— elige modelo —');
+
+        // El agrupador es el primer token del Modelo-Tipo del BOE, así que se
+        // compara contra el primer token de lo que leyó Gest-IA.
+        if (modeloSugerido) {
+          const primero = norm(modeloSugerido).split(' ')[0];
+          const m = modelos.find(x => norm(x.modelo) === primero);
+          if (m) { selModelo.value = m.modelo; await cargarVersiones(modeloSugerido); }
+        }
+      } catch (err) {
+        selModelo.innerHTML = '<option value="">Error al cargar</option>';
+        toast(err.message || 'No se pudieron cargar los modelos', 'err');
+      }
+      avisar();
+    }
+
+    async function cargarVersiones(versionSugerida) {
+      elegida = null;
+      fichaBoe.innerHTML = '';
+      if (!selModelo.value) {
+        selVer.innerHTML = '<option value="">Elige modelo</option>';
+        selVer.disabled = true;
+        return avisar();
+      }
+      selVer.innerHTML = '<option value="">Cargando…</option>';
+      selVer.disabled = true;
+      try {
+        versiones = await GTApi.preciosVersiones(
+          selMarca.value, selModelo.value, o.fechaMat() || null, o.tipoBoe());
+
+        const propuesta = versionSugerida ? mejorCandidata(versiones, versionSugerida) : null;
+        opciones(selVer, versiones.map(v => {
+          const ficha = [v.periodo_desde ? v.periodo_desde + (v.periodo_hasta ? '-' + v.periodo_hasta : '→') : null,
+                         v.cilindrada ? v.cilindrada + 'cc' : null,
+                         v.combustible, v.potencia_kw ? v.potencia_kw + 'kW' : null].filter(Boolean).join(' · ');
+          const sello = (propuesta && propuesta.v.id === v.id) ? ' ★ propuesta IA' : '';
+          return `<option value="${h(v.id)}">${h(v.denominacion)} — ${h(ficha)} — ${eur(v.valor_base_euros)}`
+               + `${v.en_periodo ? '' : ' [fuera del año]'}${sello}</option>`;
+        }).join(''), `— elige versión (${versiones.length}) —`);
+
+        pintarAvisoPropuesta(propuesta, versionSugerida);
+      } catch (err) {
+        selVer.innerHTML = '<option value="">Error al cargar</option>';
+        toast(err.message || 'No se pudieron cargar las versiones', 'err');
+      }
+      avisar();
+    }
+
+    /* Puntúa por palabras compartidas con lo que leyó Gest-IA. Solo se usa
+       para SUGERIR una opción: no rellena el valor base, y si el mejor
+       candidato empata con otro se descarta la sugerencia. */
+    function mejorCandidata(lista, texto) {
+      const busca = norm(texto).split(' ').filter(Boolean);
+      if (!busca.length) return null;
+      const puntuadas = lista.map(v => {
+        const tokens = norm(v.denominacion).split(' ').filter(Boolean);
+        const comunes = busca.filter(t => tokens.includes(t)).length;
+        return { v, score: comunes / busca.length, enPeriodo: v.en_periodo };
+      }).filter(x => x.score > 0)
+        .sort((a, b) => (b.enPeriodo - a.enPeriodo) || (b.score - a.score));
+
+      if (!puntuadas.length) return null;
+      const mejor = puntuadas[0];
+      const segunda = puntuadas[1];
+      // Empate o parecido flojo: no se sugiere nada y decide el gestor.
+      if (mejor.score < 0.6) return null;
+      if (segunda && segunda.score === mejor.score && segunda.enPeriodo === mejor.enPeriodo) return null;
+      return mejor;
+    }
+
+    function pintarAvisoPropuesta(propuesta, versionSugerida) {
+      if (!versionSugerida) return;
+      fichaBoe.innerHTML = propuesta
+        ? `<div class="boe-propuesta">
+             ${svg('<path d="M12 2l2.4 6.9H22l-6 4.3 2.3 6.8-6.3-4.4-6.3 4.4L8 13.2l-6-4.3h7.6z"/>')}
+             <div>Gest-IA propone <b>${h(propuesta.v.denominacion)}</b>
+               (${eur(propuesta.v.valor_base_euros)}) a partir de «${h(versionSugerida)}».
+               <b>Confírmala en el desplegable</b> o elige otra: el valor base no se
+               rellena hasta que la elijas.</div>
+           </div>`
+        : `<div class="boe-propuesta sin-match">
+             ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
+             <div>Gest-IA leyó «${h(versionSugerida)}» pero <b>no hay una versión
+               claramente equivalente</b> en el Anexo I. Elige la correcta a mano
+               comparándola con la ficha técnica, o introduce el valor base
+               directamente.</div>
+           </div>`;
+    }
+
+    function pintarFichaElegida(v) {
+      fichaBoe.innerHTML = `<div class="boe-propuesta elegida">
+          ${svg('<path d="M20 6L9 17l-5-5"/>')}
+          <div><b>${h(v.denominacion)}</b> · ${h(v.periodo_desde || '?')}${v.periodo_hasta ? '-' + h(v.periodo_hasta) : '→'}
+            ${v.cilindrada ? ' · ' + h(v.cilindrada) + ' c.c.' : ''}
+            ${v.num_cilindros ? ' · ' + h(v.num_cilindros) + ' cil.' : ''}
+            ${v.combustible ? ' · ' + h(v.combustible) : ''}
+            ${v.potencia_kw ? ' · ' + h(v.potencia_kw) + ' kW' : ''}
+            ${v.potencia_cv ? ' (' + h(v.potencia_cv) + ' cv)' : ''}
+            ${v.cvf ? ' · ' + h(v.cvf) + ' CVf' : ''}
+            → valor base <b>${eur(v.valor_base_euros)}</b>
+            ${v.en_periodo ? '' : '<br><b>Ojo:</b> esta versión no corresponde al año de matriculación indicado.'}
+          </div>
+        </div>`;
+    }
+
+    selMarca.addEventListener('change', () => cargarModelos(null));
+    selModelo.addEventListener('change', () => cargarVersiones(null));
+    selVer.addEventListener('change', () => {
+      elegida = versiones.find(x => x.id === selVer.value) || null;
+      if (elegida) pintarFichaElegida(elegida); else fichaBoe.innerHTML = '';
+      avisar();
+    });
+
+    return {
+      /** Carga el catálogo del tipo actual (no hace nada si ya está). */
+      sincronizar: cargarMarcas,
+      /** Fila del Anexo I elegida por el gestor, o null. */
+      elegida: () => elegida,
+      /** Marca y modelo seleccionados. Solo se usan como respaldo cuando no
+          hay fila fijada: con fila, el motor busca por id. */
+      marca: () => selMarca.value,
+      modelo: () => selModelo.value
+    };
+  }
+
   /* ---------- Panel: Calculadora ITP (solo transferencia) ---------- */
   function panelITP(exp, cont) {
     const vendeEmpresa = T.esVendedorEmpresa(exp);
@@ -1115,28 +1371,8 @@
             </div>
           </div>
 
-          <!-- Buscador del Anexo I. Solo turismos: el resto se tarifa por tramo. -->
-          <div class="boe-buscador hidden" data-buscador-boe>
-            <div class="boe-buscador-t">
-              Precio medio del Anexo I
-              <span class="boe-sello" data-contador-boe>cargando…</span>
-            </div>
-            <div class="form-grid">
-              <div class="field">
-                <label for="f-boe-marca">Marca</label>
-                <select id="f-boe-marca"><option value="">Cargando…</option></select>
-              </div>
-              <div class="field">
-                <label for="f-boe-modelo">Modelo</label>
-                <select id="f-boe-modelo" disabled><option value="">Elige marca</option></select>
-              </div>
-            </div>
-            <div class="field">
-              <label for="f-boe-version">Versión <span class="t-muted" style="font-weight:400">· la elige el gestor</span></label>
-              <select id="f-boe-version" disabled><option value="">Elige modelo</option></select>
-            </div>
-            <div class="boe-ficha" data-boe-ficha></div>
-          </div>
+          <!-- Solo turismos y autocaravanas: el resto se tarifa por tramo. -->
+          ${htmlBuscadorBoe(true)}
 
           <div class="form-grid">
             <div class="field">
@@ -1274,219 +1510,33 @@
     const selloBoe = cont.querySelector('[data-sello-boe]');
     const campoKw = cont.querySelector('[data-solo-kw]');
 
-    /* ---- Buscador del Anexo I · turismos (marca → modelo → versión) ----
-       El BOE no descompone el modelo: publica una sola cadena "Modelo-Tipo"
-       por fila. `modelo` es solo un agrupador para no listar 61.634 opciones
-       de golpe; la identidad fiscal es la versión, y la elige el gestor.
-       Mientras no elija una, el valor base sigue siendo un campo manual. */
-    const buscador  = cont.querySelector('[data-buscador-boe]');
-    const selMarca  = cont.querySelector('#f-boe-marca');
-    const selModelo = cont.querySelector('#f-boe-modelo');
-    const selVer    = cont.querySelector('#f-boe-version');
-    const fichaBoe  = cont.querySelector('[data-boe-ficha]');
-    const contadorBoe = cont.querySelector('[data-contador-boe]');
+    let valorBaseId = null;   // fila del Anexo I fijada por el gestor
 
-    let valorBaseId = null;     // fila del Anexo I fijada por el gestor
-    let versiones = [];
-    let catalogoCargado = null; // tipo del BOE cuyas marcas ya están pedidas
-
-    /** 'turismo' o 'autocaravana', según el tipo elegido. */
-    function tipoBoe() {
-      const def = window.GT_TIPOS_VEHICULO.find(t => t.id === selTipo.value);
-      return (def && def.boe) || 'turismo';
-    }
-
-    const norm = (s) => (s || '').toString().normalize('NFD')
-      .replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
-
-    function opciones(sel, lista, textoVacio) {
-      sel.innerHTML = `<option value="">${h(textoVacio)}</option>` + lista;
-      sel.disabled = false;
-    }
-
-    async function cargarMarcas() {
-      const tipo = tipoBoe();
-      if (catalogoCargado === tipo) return;
-      catalogoCargado = tipo;
-      // Al cambiar de turismo a autocaravana (o al revés) el catálogo entero
-      // es otro: se limpia lo elegido para no mezclar filas de los dos.
-      valorBaseId = null;
-      versiones = [];
-      selModelo.innerHTML = '<option value="">Elige marca</option>';
-      selModelo.disabled = true;
-      selVer.innerHTML = '<option value="">Elige modelo</option>';
-      selVer.disabled = true;
-      fichaBoe.innerHTML = '';
-      selMarca.innerHTML = '<option value="">Cargando…</option>';
-      try {
-        const marcas = await GTApi.preciosMarcas(tipo);
-        if (catalogoCargado !== tipo) return;   // cambió de tipo mientras cargaba
-        opciones(selMarca, marcas.map(m =>
-          `<option value="${h(m.marca)}">${h(m.marca)} (${m.filas})</option>`).join(''),
-          '— elige marca —');
-        const total = marcas.reduce((n, m) => n + Number(m.filas), 0);
-        contadorBoe.textContent = total.toLocaleString('es-ES') + ' versiones';
-        proponerDesdeExpediente(marcas);
-      } catch (err) {
-        catalogoCargado = null;
-        selMarca.innerHTML = '<option value="">No se pudo cargar el Anexo I</option>';
-        toast(err.message || 'No se pudo cargar el catálogo del Anexo I', 'err');
+    /* Buscador del Anexo I. El componente vive fuera del panel porque lo
+       comparte con la calculadora suelta del menu. Aqui solo se conecta:
+       al elegir version se rellena el campo del valor base y se resincroniza
+       el panel; al deshacerla, el campo vuelve a ser manual. */
+    const buscador = crearBuscadorBoe({
+      raiz: cont.querySelector('[data-buscador-boe]'),
+      tipoBoe: () => {
+        const def = window.GT_TIPOS_VEHICULO.find(t => t.id === selTipo.value);
+        return (def && def.boe) || 'turismo';
+      },
+      fechaMat: () => val(cont, 'fecha_matriculacion'),
+      sugerencia: () => ({ marca: exp.marca, modelo: exp.modelo }),
+      onCambio: (fila) => {
+        valorBaseId = fila ? fila.id : null;
+        if (fila) inputBoe.value = fila.valor_base_euros;
+        sincronizarTipo();
       }
-    }
-
-    /* Gest-IA propone; no decide. Se preseleccionan marca y modelo —que solo
-       sirven para navegar— y la versión se deja SIN elegir: es la que fija el
-       precio, así que la confirma una persona. */
-    function proponerDesdeExpediente(marcas) {
-      if (!exp.marca) return;
-      const objetivo = norm(exp.marca);
-      const m = marcas.find(x => norm(x.marca) === objetivo);
-      if (!m) return;
-      selMarca.value = m.marca;
-      cargarModelos(exp.modelo);
-    }
-
-    async function cargarModelos(modeloSugerido) {
-      valorBaseId = null;
-      selVer.innerHTML = '<option value="">Elige modelo</option>';
-      selVer.disabled = true;
-      fichaBoe.innerHTML = '';
-      if (!selMarca.value) {
-        selModelo.innerHTML = '<option value="">Elige marca</option>';
-        selModelo.disabled = true;
-        return sincronizarTipo();
-      }
-      selModelo.innerHTML = '<option value="">Cargando…</option>';
-      selModelo.disabled = true;
-      try {
-        const modelos = await GTApi.preciosModelos(selMarca.value, tipoBoe());
-        opciones(selModelo, modelos.map(x =>
-          `<option value="${h(x.modelo)}">${h(x.modelo)} (${x.filas})</option>`).join(''),
-          '— elige modelo —');
-
-        // El agrupador es el primer token del Modelo-Tipo del BOE, así que se
-        // compara contra el primer token de lo que leyó Gest-IA.
-        if (modeloSugerido) {
-          const primero = norm(modeloSugerido).split(' ')[0];
-          const m = modelos.find(x => norm(x.modelo) === primero);
-          if (m) { selModelo.value = m.modelo; await cargarVersiones(modeloSugerido); }
-        }
-      } catch (err) {
-        selModelo.innerHTML = '<option value="">Error al cargar</option>';
-        toast(err.message || 'No se pudieron cargar los modelos', 'err');
-      }
-      sincronizarTipo();
-    }
-
-    async function cargarVersiones(versionSugerida) {
-      valorBaseId = null;
-      fichaBoe.innerHTML = '';
-      if (!selModelo.value) {
-        selVer.innerHTML = '<option value="">Elige modelo</option>';
-        selVer.disabled = true;
-        return sincronizarTipo();
-      }
-      selVer.innerHTML = '<option value="">Cargando…</option>';
-      selVer.disabled = true;
-      try {
-        versiones = await GTApi.preciosVersiones(
-          selMarca.value, selModelo.value,
-          val(cont, 'fecha_matriculacion') || null, tipoBoe());
-
-        const propuesta = versionSugerida ? mejorCandidata(versiones, versionSugerida) : null;
-        opciones(selVer, versiones.map(v => {
-          const ficha = [v.periodo_desde ? v.periodo_desde + (v.periodo_hasta ? '-' + v.periodo_hasta : '→') : null,
-                         v.cilindrada ? v.cilindrada + 'cc' : null,
-                         v.combustible, v.potencia_kw ? v.potencia_kw + 'kW' : null].filter(Boolean).join(' · ');
-          const sello = (propuesta && propuesta.v.id === v.id) ? ' ★ propuesta IA' : '';
-          return `<option value="${h(v.id)}">${h(v.denominacion)} — ${h(ficha)} — ${eur(v.valor_base_euros)}`
-               + `${v.en_periodo ? '' : ' [fuera del año]'}${sello}</option>`;
-        }).join(''), `— elige versión (${versiones.length}) —`);
-
-        pintarAvisoPropuesta(propuesta, versionSugerida);
-      } catch (err) {
-        selVer.innerHTML = '<option value="">Error al cargar</option>';
-        toast(err.message || 'No se pudieron cargar las versiones', 'err');
-      }
-      sincronizarTipo();
-    }
-
-    /* Puntúa por palabras compartidas con lo que leyó Gest-IA. Solo se usa
-       para SUGERIR una opción: no rellena el valor base, y si el mejor
-       candidato empata con otro se descarta la sugerencia. */
-    function mejorCandidata(lista, texto) {
-      const busca = norm(texto).split(' ').filter(Boolean);
-      if (!busca.length) return null;
-      const puntuadas = lista.map(v => {
-        const tokens = norm(v.denominacion).split(' ').filter(Boolean);
-        const comunes = busca.filter(t => tokens.includes(t)).length;
-        return { v, score: comunes / busca.length, enPeriodo: v.en_periodo };
-      }).filter(x => x.score > 0)
-        .sort((a, b) => (b.enPeriodo - a.enPeriodo) || (b.score - a.score));
-
-      if (!puntuadas.length) return null;
-      const mejor = puntuadas[0];
-      const segunda = puntuadas[1];
-      // Empate o parecido flojo: no se sugiere nada y decide el gestor.
-      if (mejor.score < 0.6) return null;
-      if (segunda && segunda.score === mejor.score && segunda.enPeriodo === mejor.enPeriodo) return null;
-      return mejor;
-    }
-
-    function pintarAvisoPropuesta(propuesta, versionSugerida) {
-      if (!versionSugerida) return;
-      fichaBoe.innerHTML = propuesta
-        ? `<div class="boe-propuesta">
-             ${svg('<path d="M12 2l2.4 6.9H22l-6 4.3 2.3 6.8-6.3-4.4-6.3 4.4L8 13.2l-6-4.3h7.6z"/>')}
-             <div>Gest-IA propone <b>${h(propuesta.v.denominacion)}</b>
-               (${eur(propuesta.v.valor_base_euros)}) a partir de «${h(versionSugerida)}».
-               <b>Confírmala en el desplegable</b> o elige otra: el valor base no se
-               rellena hasta que la elijas.</div>
-           </div>`
-        : `<div class="boe-propuesta sin-match">
-             ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
-             <div>Gest-IA leyó «${h(versionSugerida)}» pero <b>no hay una versión
-               claramente equivalente</b> en el Anexo I. Elige la correcta a mano
-               comparándola con la ficha técnica, o introduce el valor base
-               directamente.</div>
-           </div>`;
-    }
-
-    function pintarFichaElegida(v) {
-      fichaBoe.innerHTML = `<div class="boe-propuesta elegida">
-          ${svg('<path d="M20 6L9 17l-5-5"/>')}
-          <div><b>${h(v.denominacion)}</b> · ${h(v.periodo_desde || '?')}${v.periodo_hasta ? '-' + h(v.periodo_hasta) : '→'}
-            ${v.cilindrada ? ' · ' + h(v.cilindrada) + ' c.c.' : ''}
-            ${v.num_cilindros ? ' · ' + h(v.num_cilindros) + ' cil.' : ''}
-            ${v.combustible ? ' · ' + h(v.combustible) : ''}
-            ${v.potencia_kw ? ' · ' + h(v.potencia_kw) + ' kW' : ''}
-            ${v.potencia_cv ? ' (' + h(v.potencia_cv) + ' cv)' : ''}
-            ${v.cvf ? ' · ' + h(v.cvf) + ' CVf' : ''}
-            → valor base <b>${eur(v.valor_base_euros)}</b>
-            ${v.en_periodo ? '' : '<br><b>Ojo:</b> esta versión no corresponde al año de matriculación indicado.'}
-          </div>
-        </div>`;
-    }
-
-    selMarca.addEventListener('change', () => cargarModelos(null));
-    selModelo.addEventListener('change', () => cargarVersiones(null));
-    selVer.addEventListener('change', () => {
-      const v = versiones.find(x => x.id === selVer.value);
-      valorBaseId = v ? v.id : null;
-      if (v) {
-        inputBoe.value = v.valor_base_euros;
-        pintarFichaElegida(v);
-      } else {
-        fichaBoe.innerHTML = '';
-      }
-      sincronizarTipo();
     });
+    const cajaBuscador = cont.querySelector('[data-buscador-boe]');
 
     function sincronizarTipo() {
       const def = window.GT_TIPOS_VEHICULO.find(t => t.id === selTipo.value) || window.GT_TIPOS_VEHICULO[0];
       const porModelo = def.por === 'marca_modelo';
       campoKw.classList.toggle('hidden', def.por !== 'kw');
-      buscador.classList.toggle('hidden', !porModelo);
+      cajaBuscador.classList.toggle('hidden', !porModelo);
 
       // El campo se bloquea cuando el valor lo pone la tabla: por tramo
       // (motos, quads, buggys) o por la versión que ha elegido el gestor.
@@ -1504,7 +1554,7 @@
         inputBoe.placeholder = porModelo ? 'elige la versión o escríbelo' : '21000';
       }
 
-      if (porModelo) cargarMarcas();
+      if (porModelo) buscador.sincronizar();
     }
     selTipo.addEventListener('change', () => { valorBaseId = null; sincronizarTipo(); });
     sincronizarTipo();
@@ -1525,8 +1575,8 @@
         valor_base_id: valorBaseId || null,
         tipo_vehiculo: tipoVeh,
         potencia_kw: num(cont, 'potencia_kw'),
-        marca: selMarca.value || exp.marca || null,
-        modelo: selModelo.value || exp.modelo || null,
+        marca: buscador.marca() || exp.marca || null,
+        modelo: buscador.modelo() || exp.modelo || null,
         precio_contrato: num(cont, 'precio_contrato'),
         fecha_matriculacion: val(cont, 'fecha_matriculacion'),
         fecha_transmision: new Date().toISOString().slice(0, 10),
@@ -2305,6 +2355,223 @@
   }
 
   /* ============================================================
+     VISTA · CALCULADORA ITP (herramienta suelta)
+     ------------------------------------------------------------
+     Consulta rápida, sin expediente: sirve para comprobar la cuota
+     antes de tramitar. No guarda nada.
+
+     No reimplementa el cálculo: manda los mismos datos al motor
+     `gestotrafic-itp` que el panel del expediente, y usa el mismo
+     buscador del Anexo I. Si aquí saliera otra cifra que en el
+     expediente, sería un error.
+     ============================================================ */
+  async function vistaCalculadoraITP() {
+    view.innerHTML = `
+      ${cabecera()}
+      <div class="page-head">
+        <div>
+          <h1>Calculadora ITP</h1>
+          <p>Consulta rápida del impuesto y la tasa DGT. No crea expediente ni guarda nada.</p>
+        </div>
+        <span class="badge badge-completado" style="font-size:.62rem;align-self:center">Orden HAC/1501/2025</span>
+      </div>
+
+      <div class="detail-grid">
+        <div class="itp-panel">
+          <div class="form-grid">
+            <div class="field">
+              <label for="c-tipo">Tipo de vehículo</label>
+              <select name="tipo_vehiculo" id="c-tipo">
+                ${window.GT_TIPOS_VEHICULO.map(t => `<option value="${h(t.id)}">${h(t.label)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field hidden" data-solo-kw>
+              <label>Potencia (kW)</label>
+              <input name="potencia_kw" type="number" step="0.01" min="0" placeholder="11">
+            </div>
+            <div class="field" data-campo-boe>
+              <label>Valor BOE Anexo I (€) *<span class="boe-sello hidden" data-sello-boe></span></label>
+              <input name="valor_boe" type="number" step="0.01" min="0" placeholder="21000">
+            </div>
+          </div>
+
+          ${htmlBuscadorBoe(true)}
+
+          <div class="form-grid">
+            <div class="field">
+              <label>Fecha 1ª matriculación *</label>
+              <input name="fecha_matriculacion" type="date">
+            </div>
+            <div class="field">
+              <label>CCAA del comprador</label>
+              <select name="ccaa">${window.GT_CCAA.map(c =>
+                `<option ${c === 'Comunidad de Madrid' ? 'selected' : ''}>${h(c)}</option>`).join('')}</select>
+            </div>
+            <div class="field">
+              <label>Precio de contrato (€)</label>
+              <input name="precio_contrato" type="number" step="0.01" min="0" placeholder="8500">
+            </div>
+            <div class="field">
+              <label>Cilindrada (c.c.)</label>
+              <input name="cilindrada" type="number" min="0">
+            </div>
+            <div class="field">
+              <label>Potencia fiscal (CVf)</label>
+              <input name="cvf" type="number" step="0.01" min="0">
+            </div>
+            <div class="field">
+              <label>Etiqueta DGT</label>
+              <select name="etiqueta_dgt">${window.GT_ETIQUETAS.map(e =>
+                `<option value="${h(e.id)}">${h(e.label)}</option>`).join('')}</select>
+            </div>
+            <div class="field">
+              <label>Uso especial (taxi / autoescuela / alquiler)</label>
+              <select name="uso_especial">
+                <option value="no">No · base al 100%</option>
+                <option value="si">Sí · reducción del 70%</option>
+              </select>
+            </div>
+          </div>
+
+          <button class="btn btn-full" id="c-calcular" style="margin-top:6px">Calcular</button>
+
+          <div class="itp-out">
+            <div class="itp-cell"><div class="itp-cell-num" id="c-r-venal">—</div><div class="itp-cell-lbl">Valor venal</div></div>
+            <div class="itp-cell"><div class="itp-cell-num" id="c-r-itp">—</div><div class="itp-cell-lbl">ITP</div></div>
+            <div class="itp-cell"><div class="itp-cell-num" id="c-r-dgt">—</div><div class="itp-cell-lbl">Tasa DGT</div></div>
+            <div class="itp-cell total"><div class="itp-cell-num" id="c-r-total">—</div><div class="itp-cell-lbl">Total</div></div>
+          </div>
+          <div class="itp-detail" id="c-detalle">Elige el vehículo y pulsa <b>Calcular</b>.</div>
+        </div>
+
+        <div class="stack">
+          <div class="card">
+            <div class="card-t">Cómo se calcula</div>
+            <p class="t-muted" style="font-size:.8rem;line-height:1.6;margin:0">
+              Precio medio del <b>Anexo I</b> × depreciación del <b>Anexo IV</b> según los años
+              de uso = <b>valor venal</b>. La base imponible es el mayor entre ese valor y el
+              precio de contrato. Sobre ella, el tipo de la CCAA, su cuota fija o su exención.
+              Lo resuelve el motor <span class="t-mono">gestotrafic-itp</span>, el mismo del
+              expediente.
+            </p>
+          </div>
+          ${avisoRegulado()}
+        </div>
+      </div>
+      ${footer()}`;
+
+    const selTipo  = view.querySelector('#c-tipo');
+    const campoBoe = view.querySelector('[data-campo-boe]');
+    const inputBoe = campoBoe.querySelector('input');
+    const selloBoe = view.querySelector('[data-sello-boe]');
+    const campoKw  = view.querySelector('[data-solo-kw]');
+    const cajaBuscador = view.querySelector('[data-buscador-boe]');
+    let valorBaseId = null;
+
+    const buscador = crearBuscadorBoe({
+      raiz: cajaBuscador,
+      tipoBoe: () => {
+        const def = window.GT_TIPOS_VEHICULO.find(t => t.id === selTipo.value);
+        return (def && def.boe) || 'turismo';
+      },
+      fechaMat: () => val(view, 'fecha_matriculacion'),
+      sugerencia: null,       // aquí no hay expediente del que partir
+      onCambio: (fila) => {
+        valorBaseId = fila ? fila.id : null;
+        if (fila) {
+          inputBoe.value = fila.valor_base_euros;
+          // La ficha técnica de la fila ahorra teclear lo que afecta al tipo.
+          if (fila.cilindrada && !val(view, 'cilindrada')) {
+            view.querySelector('[name=cilindrada]').value = fila.cilindrada;
+          }
+          if (fila.cvf && !val(view, 'cvf')) view.querySelector('[name=cvf]').value = fila.cvf;
+        }
+        sincronizar();
+      }
+    });
+
+    function sincronizar() {
+      const def = window.GT_TIPOS_VEHICULO.find(t => t.id === selTipo.value) || window.GT_TIPOS_VEHICULO[0];
+      const porModelo = def.por === 'marca_modelo';
+      campoKw.classList.toggle('hidden', def.por !== 'kw');
+      cajaBuscador.classList.toggle('hidden', !porModelo);
+
+      const desdeTabla = def.auto || (porModelo && valorBaseId);
+      inputBoe.readOnly = !!desdeTabla;
+      campoBoe.classList.toggle('boe-auto', !!desdeTabla);
+      selloBoe.classList.toggle('hidden', !desdeTabla);
+
+      if (def.auto) {
+        selloBoe.textContent = 'automático';
+        inputBoe.placeholder = def.por === 'kw' ? 'lo calcula por kW' : 'lo calcula por cilindrada';
+      } else if (porModelo && valorBaseId) {
+        selloBoe.textContent = 'Anexo I · versión elegida';
+      } else {
+        inputBoe.placeholder = porModelo ? 'elige la versión o escríbelo' : '21000';
+      }
+
+      if (porModelo) buscador.sincronizar();
+    }
+    selTipo.addEventListener('change', () => { valorBaseId = null; sincronizar(); });
+    sincronizar();
+
+    view.querySelector('#c-calcular').addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      const tipoVeh = val(view, 'tipo_vehiculo') || 'coche';
+      const def = window.GT_TIPOS_VEHICULO.find(t => t.id === tipoVeh) || {};
+      const desdeTabla = def.auto || (def.por === 'marca_modelo' && valorBaseId);
+
+      const payload = {
+        // Con valor de tabla NO se manda el manual: el motor respetaría el
+        // manual y no llegaría a consultar la tabla.
+        valor_boe: desdeTabla ? null : num(view, 'valor_boe'),
+        valor_base_id: valorBaseId || null,
+        tipo_vehiculo: tipoVeh,
+        potencia_kw: num(view, 'potencia_kw'),
+        precio_contrato: num(view, 'precio_contrato'),
+        fecha_matriculacion: val(view, 'fecha_matriculacion'),
+        fecha_transmision: new Date().toISOString().slice(0, 10),
+        ccaa: val(view, 'ccaa'),
+        cilindrada: num(view, 'cilindrada'),
+        cvf: num(view, 'cvf'),
+        etiqueta_dgt: val(view, 'etiqueta_dgt'),
+        uso_especial: val(view, 'uso_especial') === 'si'
+      };
+
+      if (!payload.fecha_matriculacion) { toast('Falta la fecha de matriculación', 'err'); return; }
+      if (!desdeTabla && !payload.valor_boe) {
+        toast('Elige la versión en el Anexo I o escribe el valor base', 'err'); return;
+      }
+      if (def.auto && !payload.cilindrada && !payload.potencia_kw) {
+        toast('Falta la cilindrada (o los kW en eléctricas)', 'err'); return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>';
+      try {
+        const r = await GTApi.calcularITP(payload);
+        if (desdeTabla) {
+          inputBoe.value = r.detalle.valor_boe;
+          const fila = r.detalle.valor_base_fila;
+          if (fila && fila.tramo_etiqueta) selloBoe.textContent = fila.tramo_etiqueta;
+        }
+        view.querySelector('#c-r-venal').textContent = eur(r.valor_venal);
+        view.querySelector('#c-r-itp').textContent   = eur(r.itp);
+        view.querySelector('#c-r-dgt').textContent   = eur(r.tasa_dgt);
+        view.querySelector('#c-r-total').textContent = eur(r.total_impuestos);
+        view.querySelector('#c-detalle').innerHTML   = detalleTexto(r);
+      } catch (err) {
+        view.querySelector('#c-detalle').innerHTML =
+          `<span style="color:var(--danger)">${h(err.message || 'No se pudo calcular')}</span>`;
+        toast(err.message || 'No se pudo calcular', 'err');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Calcular';
+      }
+    });
+  }
+
+  /* ============================================================
      VISTA · GESTORES (solo admin)
      ============================================================ */
   async function vistaGestores() {
@@ -2613,6 +2880,8 @@
         } else {
           await vistaExpedientes();
         }
+      } else if (seccion === 'calculadora') {
+        await vistaCalculadoraITP();
       } else if (seccion === 'kanban') {
         await vistaKanban();
       } else if (seccion === 'gest-ia') {
