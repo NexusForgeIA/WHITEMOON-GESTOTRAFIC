@@ -18,12 +18,11 @@
 <div class="login-wrap">
   <form class="login-card" id="login-form" autocomplete="off">
     <div class="login-logo">
-      <div class="login-logo-mark">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M5 14l1.6-5h10.8l1.6 5"/><rect x="3" y="14" width="18" height="4" rx="1"/>
-          <circle cx="8" cy="18" r="1.4"/><circle cx="16" cy="18" r="1.4"/>
-        </svg>
-      </div>
+      <!-- width/height son las dimensiones reales del archivo: dan la relación
+           de aspecto al navegador y evitan el salto de layout mientras carga.
+           El tamaño en pantalla lo pone el CSS. -->
+      <img class="login-logo-img" src="assets/img/logo-gestotrafic.png"
+           alt="GestoTrafic" width="480" height="363" decoding="async">
       <div class="login-logo-txt">
         <strong>GestoTrafic</strong>
         <small>CRM para gestorías de tráfico</small>
