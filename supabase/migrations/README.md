@@ -26,14 +26,26 @@ Todo vive bajo el prefijo `gestotrafic_*`. La única referencia fuera de él es
 | 12 | `gestotrafic_precios_catalogo_turismo` | `..._marcas` / `..._modelos` / `..._versiones` para los desplegables, con `execute` solo para `authenticated` |
 | 13 | `gestotrafic_buscar_valor_base_solo_servidor` | Cierra el `execute` de las funciones de búsqueda a `anon` (las usa la Edge Function con `service_role`) |
 | 14 | `gestotrafic_precios_modelos_sin_duplicar_por_mayusculas` | El BOE escribe «MEGANE» y «Megane»: se agrupa sin distinguir caja para no ofrecer entradas duplicadas |
+| 15 | `gestotrafic_precios_medios_autocaravana` | Admite `tipo_vehiculo = 'autocaravana'`; la restricción de identificación y los índices pasan a distinguir «tarifa por modelo» de «tarifa por tramo» |
+| 16 | `gestotrafic_valor_base_por_tipo` | La búsqueda lleva `p_tipo_vehiculo`: un id de autocaravana pedido como turismo devuelve `sin_match` en vez de calcular con otra depreciación |
+| 17 | `gestotrafic_precios_catalogo_por_tipo` | Las tres funciones de catálogo aceptan el tipo, para que cada buscador vea solo sus filas |
 
-## Carga de los turismos del Anexo I
+## Carga de las filas del Anexo I
 
-Las 61.634 filas de turismos **no van en una migración**: se cargan desde
-[`data/boe/anexo1-turismos-2026.tsv`](../../data/boe/), que es el volcado
-verificable del XML del BOE. El procedimiento completo (descarga, parseo y
-recarga anual) está en [`data/boe/README.md`](../../data/boe/README.md).
+Las filas que se tarifan por marca/modelo **no van en una migración**: se cargan
+desde los TSV de [`data/boe/`](../../data/boe/), que son el volcado verificable
+del XML del BOE.
 
-La carga se hizo con la extensión `http` —instalada y **retirada** al terminar—
-leyendo el TSV desde el repositorio y comprobando los agregados (recuento,
-marcas, suma de importes y nulos por columna) contra el fichero de origen.
+| `tipo_vehiculo` | Filas | Fichero |
+|---|---|---|
+| `turismo` | 61.634 | `anexo1-turismos-2026.tsv` |
+| `autocaravana` | 9.252 | `anexo1-autocaravanas-2026.tsv` |
+
+Van separados **a propósito**: el Anexo IV los deprecia con tablas distintas
+(13 tramos frente a 19). El procedimiento completo —descarga, parseo y recarga
+anual— está en [`data/boe/README.md`](../../data/boe/README.md).
+
+Las cargas se hicieron con la extensión `http` —instalada y **retirada** al
+terminar— leyendo el TSV desde el repositorio y comprobando los agregados
+(recuento, marcas, suma de importes, suma de kW y nulos por columna) contra el
+fichero de origen.

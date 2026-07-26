@@ -103,18 +103,27 @@ buena la migración (ver *Verificación* abajo).
 | `quad` | 12 | tramo de cilindrada | `calculadora-itp` · `tablaQuads` |
 | `buggy` | 6 | tramo de cilindrada | `calculadora-itp` · `tablaBuggys` |
 | `turismo` | **61.634** | marca / modelo / versión | XML del BOE · [`data/boe/`](data/boe/) |
+| `autocaravana` | **9.252** | marca / modelo / versión | XML del BOE · [`data/boe/`](data/boe/) |
 
-Los turismos ya no piden el valor base a mano: se elige la versión en el
-buscador del panel ITP y el valor sale del Anexo I. **El campo manual sigue
-existiendo** como respaldo para lo que no esté en la tabla.
+Ninguno pide ya el valor base a mano: se elige la versión en el buscador del
+panel ITP y el valor sale del Anexo I. **El campo manual sigue existiendo** como
+respaldo para lo que no esté en la tabla.
 
-> **Las autocaravanas no están cargadas y no deben cargarse tal cual.** El
-> Anexo I las lista aparte (tablas 112-188 del XML) y el **Anexo IV les aplica
-> otra tabla de depreciación** —18 tramos hasta el 10 %, frente a los 13 de los
-> turismos—. `gestotrafic-itp` solo implementa la de turismos, así que cargarlas
-> sin añadir esa segunda tabla daría una cuota incorrecta.
+> ⚠️ **Turismo y autocaravana NO son intercambiables.** El Anexo IV les aplica
+> **tablas de depreciación distintas**: la general (13 tramos) y la de
+> autocaravanas, campers y vehículos vivienda (19 tramos, hasta «más de 18
+> años»). La segunda baja mucho más despacio — a los 5 años conserva el 59 %
+> frente al 39 %—, así que **depreciar una autocaravana con la tabla de
+> turismos liquida de menos**: en el BENIMAR Sport Up 340 de 2019 la diferencia
+> es 1.443,84 € frente a 842,24 €.
+>
+> Por eso van con `tipo_vehiculo` distinto, cada buscador ve solo sus filas, y
+> la búsqueda filtra por tipo: pedir un id de autocaravana como turismo devuelve
+> `sin_match` en lugar de calcular con la tabla equivocada.
 
 ### Por qué la versión la elige una persona
+
+Vale igual para turismos y autocaravanas.
 
 El BOE no descompone el modelo: publica una sola cadena «Modelo-Tipo» por fila.
 La columna `modelo` de la tabla es **el primer token de esa cadena**, un
@@ -149,10 +158,11 @@ si producción cambia. Sale con código 1 ante cualquier discrepancia.
 **Valor venal, base imponible y cuota tienen que coincidir al céntimo.** Si no
 coinciden, no se mergea: se reporta la discrepancia.
 
-Cubre 14 casos: los tres de referencia, el valor base automático de turismos y
-de motos, las ramas fiscales (exención, cuota fija estándar y valenciana, ECO,
->15 CVf, uso especial) y los dos en que el motor **debe negarse a calcular**
-(varias versiones posibles y sin match).
+Cubre 20 casos: los tres de referencia, el valor base automático de turismos,
+autocaravanas y motos, **las dos tablas del Anexo IV** (comprobando además que
+el motor declara cuál ha usado), las ramas fiscales (exención, cuota fija
+estándar y valenciana, ECO, >15 CVf, uso especial) y los dos en que el motor
+**debe negarse a calcular** (varias versiones posibles y sin match).
 
 Casos de referencia verificados (Orden HAC/1501/2025):
 
@@ -163,6 +173,7 @@ Casos de referencia verificados (Orden HAC/1501/2025):
 | Moto eléctrica 11 kW, 2022 | 4.500 € (automático) | 2.115,00 € | 84,60 € |
 | SEAT Ibiza 1.0 TSI Style (2021), Madrid | 13.600 € (Anexo I) | 5.304,00 € | 212,16 € |
 | Tesla Model 3 Gran Autonomía RWD, Cataluña, etiqueta 0 | 48.300 € (Anexo I) | 18.837,00 € | 0,00 € |
+| BENIMAR Sport Up 340 (2019), Madrid · **autocaravana** | 75.200 € (Anexo I) | 36.096,00 € | 1.443,84 € |
 
 Si además tocas las **tablas** de `gestotrafic-itp`, compáralas valor a valor
 con las de producción antes de desplegar: un dígito mal transcrito en la
