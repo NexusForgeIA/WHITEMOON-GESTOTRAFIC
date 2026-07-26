@@ -1100,7 +1100,17 @@
 
           <div class="form-grid">
             <div class="field">
-              <label>Valor BOE Anexo I (€) *</label>
+              <label for="f-tipo-veh">Tipo de vehículo</label>
+              <select name="tipo_vehiculo" id="f-tipo-veh">
+                ${window.GT_TIPOS_VEHICULO.map(t => `<option value="${h(t.id)}" ${(T.leer(exp, 'tipo_vehiculo') || 'coche') === t.id ? 'selected' : ''}>${h(t.label)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field hidden" data-solo-kw>
+              <label>Potencia (kW)</label>
+              <input name="potencia_kw" type="number" step="0.01" min="0" value="${T.leer(exp, 'potencia_kw') ?? ''}" placeholder="11">
+            </div>
+            <div class="field" data-campo-boe>
+              <label>Valor BOE Anexo I (€) *<span class="boe-sello hidden" data-sello-boe></span></label>
               <input name="valor_boe" type="number" step="0.01" min="0" value="${exp.valor_boe ?? ''}" placeholder="21000">
             </div>
             <div class="field">
@@ -1228,10 +1238,44 @@
       }
     });
 
+    /* Valor base automático: para todo lo que no sea turismo, el Anexo I
+       tarifa por tramo de cilindrada (o de kW), así que el motor lo busca
+       solo en gestotrafic_precios_medios y el campo manual sobra. El
+       turismo sigue pidiéndolo a mano hasta que tengamos su lista. */
+    const selTipo = cont.querySelector('#f-tipo-veh');
+    const campoBoe = cont.querySelector('[data-campo-boe]');
+    const inputBoe = campoBoe.querySelector('input');
+    const selloBoe = cont.querySelector('[data-sello-boe]');
+    const campoKw = cont.querySelector('[data-solo-kw]');
+
+    function sincronizarTipo() {
+      const def = window.GT_TIPOS_VEHICULO.find(t => t.id === selTipo.value) || window.GT_TIPOS_VEHICULO[0];
+      campoKw.classList.toggle('hidden', def.por !== 'kw');
+      inputBoe.readOnly = def.auto;
+      campoBoe.classList.toggle('boe-auto', def.auto);
+      selloBoe.classList.toggle('hidden', !def.auto);
+      if (def.auto) {
+        selloBoe.textContent = 'automático';
+        inputBoe.placeholder = def.por === 'kw' ? 'lo calcula por kW' : 'lo calcula por cilindrada';
+      } else {
+        inputBoe.placeholder = '21000';
+      }
+    }
+    selTipo.addEventListener('change', sincronizarTipo);
+    sincronizarTipo();
+
     cont.querySelector('#btn-calcular').addEventListener('click', async () => {
       const btn = cont.querySelector('#btn-calcular');
+      const tipoVeh = val(cont, 'tipo_vehiculo') || 'coche';
+      const autoBase = (window.GT_TIPOS_VEHICULO.find(t => t.id === tipoVeh) || {}).auto;
       const payload = {
-        valor_boe: num(cont, 'valor_boe'),
+        // Con valor base automático NO se manda el manual: si se mandara,
+        // el motor lo respetaría y la tabla no llegaría a consultarse.
+        valor_boe: autoBase ? null : num(cont, 'valor_boe'),
+        tipo_vehiculo: tipoVeh,
+        potencia_kw: num(cont, 'potencia_kw'),
+        marca: exp.marca || null,
+        modelo: exp.modelo || null,
         precio_contrato: num(cont, 'precio_contrato'),
         fecha_matriculacion: val(cont, 'fecha_matriculacion'),
         fecha_transmision: new Date().toISOString().slice(0, 10),
@@ -1239,17 +1283,28 @@
         cilindrada: num(cont, 'cilindrada'),
         cvf: num(cont, 'cvf'),
         etiqueta_dgt: val(cont, 'etiqueta_dgt'),
-        uso_especial: val(cont, 'uso_especial') === 'si',
-        tipo_vehiculo: 'coche'
+        uso_especial: val(cont, 'uso_especial') === 'si'
       };
 
-      if (!payload.valor_boe) { toast('Falta el valor BOE del vehículo', 'err'); return; }
       if (!payload.fecha_matriculacion) { toast('Falta la fecha de matriculación', 'err'); return; }
+      if (!autoBase && !payload.valor_boe) { toast('Falta el valor BOE del vehículo', 'err'); return; }
+      if (autoBase && !payload.cilindrada && !payload.potencia_kw) {
+        toast('Para buscar el valor base falta la cilindrada (o los kW en eléctricas)', 'err'); return;
+      }
 
       btn.disabled = true;
       btn.innerHTML = '<span class="spinner"></span>';
       try {
         const r = await GTApi.calcularITP(payload);
+
+        /* Con valor base automático, el valor lo resuelve el motor: se lee de
+           su respuesta y se refleja en el campo, que sigue en solo lectura. */
+        const valorBoeUsado = r.detalle ? r.detalle.valor_boe : payload.valor_boe;
+        if (autoBase) {
+          inputBoe.value = valorBoeUsado;
+          const filaBoe = r.detalle && r.detalle.valor_base_fila;
+          if (filaBoe && filaBoe.tramo_etiqueta) selloBoe.textContent = filaBoe.tramo_etiqueta;
+        }
 
         /* La exención la decide el gestor, no el motor: si está marcada se
            respeta y solo queda la tasa DGT. `calculo_json` guarda siempre el
@@ -1258,8 +1313,14 @@
         const itpFinal = exento ? 0 : r.itp;
         const totalFinal = exento ? r.tasa_dgt : r.total_impuestos;
 
+        const datosVeh = Object.assign({}, exp.datos || {}, {
+          tipo_vehiculo: tipoVeh,
+          potencia_kw: payload.potencia_kw
+        });
+
         await GTApi.actualizarExpediente(exp.id, {
-          valor_boe: payload.valor_boe,
+          datos: datosVeh,
+          valor_boe: valorBoeUsado,
           precio_contrato: payload.precio_contrato,
           fecha_matriculacion: payload.fecha_matriculacion,
           ccaa: payload.ccaa,
@@ -1277,7 +1338,8 @@
         });
 
         Object.assign(exp, {
-          valor_boe: payload.valor_boe, precio_contrato: payload.precio_contrato,
+          datos: datosVeh,
+          valor_boe: valorBoeUsado, precio_contrato: payload.precio_contrato,
           valor_venal: r.valor_venal, itp_importe: itpFinal, tasa_dgt: r.tasa_dgt,
           total_impuestos: totalFinal, calculo_json: r
         });
@@ -1299,7 +1361,11 @@
       ? (d.tipo_aplicable * 100).toLocaleString('es-ES', { maximumFractionDigits: 2 }) + '%'
       : h(d.tipo_aplicable || '—');
 
-    return `Valor BOE <b>${eur(d.valor_boe)}</b> × depreciación <b>${((d.pct_depreciacion || 0) * 100).toFixed(0)}%</b>
+    const fuenteBase = d.valor_base_origen === 'tabla_boe'
+      ? ` <span class="boe-sello">Anexo I automático${d.valor_base_fila && d.valor_base_fila.tramo_etiqueta ? ' · ' + h(d.valor_base_fila.tramo_etiqueta) : ''}</span>`
+      : '';
+
+    return `Valor BOE <b>${eur(d.valor_boe)}</b>${fuenteBase} × depreciación <b>${((d.pct_depreciacion || 0) * 100).toFixed(0)}%</b>
       (${h(d.tramo || '')})${d.coef_uso_especial === 0.7 ? ' × <b>70%</b> uso especial' : ''}
       = valor venal <b>${eur(r.valor_venal)}</b>.<br>
       Base imponible <b>${eur(r.base_imponible)}</b>${d.base_desde_contrato ? ' (precio de contrato, superior al valor fiscal)' : ''}
