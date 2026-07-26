@@ -753,6 +753,99 @@ tbody tr.clickable:hover { background: rgba(124, 77, 255, .07); }
 }
 .itp-exento-nota b { color: #d6fff4; }
 
+/* ---------------- Gest-IA ---------------- */
+.h1-ico { width: 26px; height: 26px; color: var(--p2); vertical-align: -3px; margin-right: 4px; }
+.nav-ia svg { color: var(--p2); }
+
+.badge-ia {
+  background: linear-gradient(135deg, rgba(124, 77, 255, .22), rgba(0, 212, 170, .18));
+  color: #c9b3ff; font-size: .6rem; letter-spacing: .06em;
+}
+
+.ia-progreso {
+  max-width: 460px; margin: 60px auto; text-align: center;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 34px 28px;
+}
+.ia-progreso-ico {
+  width: 54px; height: 54px; margin: 0 auto 16px;
+  display: grid; place-items: center; border-radius: 16px;
+  background: linear-gradient(135deg, rgba(124, 77, 255, .22), rgba(0, 212, 170, .16));
+  color: var(--p2);
+  animation: ia-late 1.8s ease-in-out infinite;
+}
+.ia-progreso-ico svg { width: 28px; height: 28px; }
+.ia-progreso h2 { font-size: 1.1rem; margin-bottom: 6px; }
+.ia-progreso p { color: var(--muted); font-size: .85rem; margin: 0 0 18px; }
+@keyframes ia-late { 0%, 100% { transform: scale(1); opacity: .85 } 50% { transform: scale(1.06); opacity: 1 } }
+@media (prefers-reduced-motion: reduce) { .ia-progreso-ico { animation: none } }
+
+.ia-banner {
+  background: linear-gradient(160deg, rgba(124, 77, 255, .12), rgba(0, 212, 170, .06));
+  border: 1px solid rgba(124, 77, 255, .34);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+.ia-banner.validado {
+  display: flex; gap: 11px; align-items: flex-start;
+  background: rgba(0, 212, 170, .07); border-color: rgba(0, 212, 170, .3);
+  color: #9fe6d4; font-size: .8rem; line-height: 1.6;
+}
+.ia-banner.validado svg { width: 17px; height: 17px; flex-shrink: 0; margin-top: 2px; color: var(--g); }
+.ia-banner.validado b { color: #d6fff4; }
+
+.ia-banner-cab { display: flex; gap: 13px; align-items: flex-start; flex-wrap: wrap; }
+.ia-banner-ico {
+  width: 34px; height: 34px; flex-shrink: 0;
+  display: grid; place-items: center; border-radius: 10px;
+  background: rgba(124, 77, 255, .2); color: var(--p2);
+}
+.ia-banner-ico svg { width: 18px; height: 18px; }
+.ia-banner-cab > div > b { display: block; font-size: .88rem; }
+.ia-banner-cab small { display: block; color: var(--muted); font-size: .78rem; line-height: 1.6; margin-top: 3px; max-width: 62ch; }
+.ia-banner-cab small b { color: var(--text); }
+
+.ia-banner-kpis { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 13px; }
+.ia-chip {
+  padding: 3px 10px; border-radius: 99px;
+  font-size: .7rem; font-weight: 700; white-space: nowrap;
+}
+.ia-chip.alta  { background: rgba(0, 212, 170, .15);  color: var(--g); }
+.ia-chip.media { background: rgba(255, 180, 92, .15); color: var(--warn); }
+.ia-chip.baja  { background: rgba(255, 92, 122, .15); color: var(--danger); }
+
+.ia-huecos {
+  display: flex; gap: 10px; align-items: flex-start;
+  margin-top: 13px; padding-top: 12px;
+  border-top: 1px solid rgba(124, 77, 255, .2);
+  font-size: .78rem; color: #e8c79a; line-height: 1.6;
+}
+.ia-huecos svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 2px; color: var(--warn); }
+.ia-huecos b { color: #ffd9a8; }
+
+/* Campos que vienen de una propuesta de Gest-IA */
+.ia-sello {
+  margin-left: 7px; padding: 1px 7px; border-radius: 99px;
+  font-size: .6rem; font-weight: 800; letter-spacing: .04em;
+  text-transform: uppercase; cursor: help;
+}
+.ia-sello.alta  { background: rgba(0, 212, 170, .16);  color: var(--g); }
+.ia-sello.media { background: rgba(255, 180, 92, .16); color: var(--warn); }
+.ia-sello.baja  { background: rgba(255, 92, 122, .16); color: var(--danger); }
+.ia-sello.hueco { background: rgba(255, 92, 122, .16); color: var(--danger); }
+
+.ia-campo.ia-alta  input, .ia-campo.ia-alta  select { border-color: rgba(0, 212, 170, .3); }
+.ia-campo.ia-media input, .ia-campo.ia-media select {
+  border-color: rgba(255, 180, 92, .5); background: rgba(255, 180, 92, .06);
+}
+.ia-campo.ia-baja  input, .ia-campo.ia-baja  select,
+.ia-campo.ia-hueco input, .ia-campo.ia-hueco select {
+  border-color: rgba(255, 92, 122, .55); background: rgba(255, 92, 122, .07);
+}
+
+.kan-card.ia-pendiente { border-color: rgba(124, 77, 255, .45); }
+
 /* ---------------- Utilidades ---------------- */
 .empty { text-align: center; padding: 46px 22px; color: var(--muted); }
 .empty svg { width: 40px; height: 40px; opacity: .34; margin-bottom: 12px; }

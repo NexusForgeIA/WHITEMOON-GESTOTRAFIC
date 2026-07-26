@@ -11,6 +11,7 @@ poder reconstruir el esquema desde cero:
 | 3 | `gestotrafic_usuarios_bootstrap_demo` | Admin y dos gestores de arranque (`admin`, `gestor`, `marcos`) |
 | 4 | `gestotrafic_cerrar_acceso_anonimo` | Clientes solo con sesión; bucket privado y políticas de Storage por propiedad |
 | 5 | `gestotrafic_docs_update_policy` | Política de `update` en `storage.objects` (necesaria para el upsert al resubir un documento) |
+| 6 | `gestotrafic_gestia_intake` | Columnas de Gest-IA en expedientes: `ia_estado`, `ia_extraccion`, `ia_modelo`, `ia_validado_por`, `ia_validado_at` |
 
 Todo vive bajo el prefijo `gestotrafic_*`. La única referencia fuera de él es
 `auth.users`, que sostiene la sesión (ver [`../../docs/USUARIOS.md`](../../docs/USUARIOS.md)).

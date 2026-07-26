@@ -67,8 +67,11 @@
 
   /* ---------------- Expedientes ---------------- */
 
+  /* Dos relaciones apuntan a gestotrafic_usuarios (gestor y validador de IA),
+     así que hay que desambiguarlas nombrando la columna de la FK. */
   var SELECT_EXP = '*, cliente:' + C.TABLA_CLIENTES + '(id, nombre, apellidos, razon_social, tipo, nif)'
-                 + ', gestor:' + C.TABLA_USUARIOS + '(id, nombre, usuario)';
+                 + ', gestor:' + C.TABLA_USUARIOS + '!gestor_id(id, nombre, usuario)'
+                 + ', ia_validador:' + C.TABLA_USUARIOS + '!ia_validado_por(id, nombre)';
 
   async function listarExpedientes() {
     return unwrap(await sb.from(C.TABLA_EXPEDIENTES).select(SELECT_EXP).order('created_at', { ascending: false }));
@@ -248,6 +251,50 @@
       .eq('id', usuarioId).select('id, nombre, usuario, rol, activo').single());
   }
 
+  /* ---------------- Gest-IA ---------------- */
+
+  /** Manda los documentos ya subidos a la Edge Function para que los lea
+      Claude. La API key vive en el servidor; aquí solo va el token de sesión. */
+  async function analizarDocumentos(expedienteId, documentos) {
+    var res = await fetch(C.SUPABASE_URL + '/functions/v1/' + C.FN_GESTIA, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': C.SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + (global.GTAuth.getToken() || '')
+      },
+      body: JSON.stringify({ expediente_id: expedienteId, documentos: documentos })
+    });
+    var data = await res.json().catch(function () { return {}; });
+    if (!res.ok || data.error) throw new Error(data.error || 'Gest-IA no pudo leer los documentos');
+    return data;
+  }
+
+  /** Sube un documento a un expediente ya creado, sin registrar fila todavía. */
+  async function subirArchivo(expedienteId, tipo, file) {
+    var ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+    var path = expedienteId + '/' + tipo + '-' + Date.now() + '.' + ext;
+    var up = await sb.storage.from(C.BUCKET_DOCS).upload(path, file, {
+      cacheControl: '3600', upsert: false,
+      contentType: file.type || 'application/octet-stream'
+    });
+    if (up.error) throw new Error('No se pudo subir ' + file.name + ': ' + up.error.message);
+    return { path: path, nombre: file.name, mime: file.type || null, tamano: file.size };
+  }
+
+  /** Registra en el checklist un archivo ya subido. */
+  async function registrarDocumento(expedienteId, tipo, archivo) {
+    return unwrap(await sb.from(C.TABLA_DOCUMENTOS).insert({
+      expediente_id: expedienteId,
+      tipo: tipo,
+      estado: 'recibido',
+      nombre_archivo: archivo.nombre,
+      storage_path: archivo.path,
+      mime: archivo.mime,
+      tamano: archivo.tamano
+    }).select().single());
+  }
+
   /* ---------------- KPIs ---------------- */
 
   async function kpis() {
@@ -304,6 +351,9 @@
     urlDocumento: urlDocumento,
     urlsDocumentos: urlsDocumentos,
     calcularITP: calcularITP,
+    analizarDocumentos: analizarDocumentos,
+    subirArchivo: subirArchivo,
+    registrarDocumento: registrarDocumento,
     kpis: kpis
   };
 })(window);
