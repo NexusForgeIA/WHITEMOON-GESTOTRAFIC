@@ -768,6 +768,42 @@ tbody tr.clickable:hover { background: rgba(124, 77, 255, .07); }
   text-transform: uppercase; white-space: nowrap;
 }
 
+/* Buscador marca → modelo → versión sobre las filas del Anexo I */
+.boe-buscador {
+  margin: 4px 0 16px; padding: 14px 14px 4px;
+  border: 1px solid rgba(124, 77, 255, .22);
+  border-radius: 12px;
+  background: rgba(124, 77, 255, .05);
+}
+.boe-buscador-t {
+  font-size: .74rem; font-weight: 800; letter-spacing: .02em;
+  text-transform: uppercase; color: var(--p2); margin-bottom: 10px;
+}
+.boe-buscador select { font-size: .82rem; }
+/* Las denominaciones del BOE son largas: que no ensanchen el panel. */
+.boe-buscador #f-boe-version { max-width: 100%; text-overflow: ellipsis; }
+
+.boe-ficha:empty { display: none; }
+.boe-propuesta {
+  display: flex; gap: 9px; align-items: flex-start;
+  margin: 4px 0 12px; padding: 10px 12px; border-radius: 10px;
+  font-size: .78rem; line-height: 1.45;
+  background: rgba(124, 77, 255, .1);
+  border: 1px solid rgba(124, 77, 255, .26);
+  color: #cbb8ff;
+}
+.boe-propuesta svg { width: 16px; height: 16px; flex: none; margin-top: 2px; }
+.boe-propuesta.elegida {
+  background: rgba(0, 212, 170, .1);
+  border-color: rgba(0, 212, 170, .3);
+  color: #9fe6d4;
+}
+.boe-propuesta.sin-match {
+  background: rgba(255, 180, 92, .1);
+  border-color: rgba(255, 180, 92, .3);
+  color: #ffd9a8;
+}
+
 /* ---------------- Gest-IA ---------------- */
 .h1-ico { width: 26px; height: 26px; color: var(--p2); vertical-align: -3px; margin-right: 4px; }
 .nav-ia svg { color: var(--p2); }

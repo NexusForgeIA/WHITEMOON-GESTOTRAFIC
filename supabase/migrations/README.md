@@ -21,3 +21,19 @@ Todo vive bajo el prefijo `gestotrafic_*`. La única referencia fuera de él es
 | 7 | `gestotrafic_precios_medios` | Tabla de precios medios del Anexo I (turismos por marca/modelo, resto por tramo) + RLS de solo lectura |
 | 8 | `gestotrafic_precios_medios_carga_tramos` | Carga de los 45 tramos reales de motos, quads y buggys (Orden HAC/1501/2025) |
 | 9 | `gestotrafic_buscar_valor_base` / `_fix` | Funciones de búsqueda del valor base; devuelven `encontrado=false` en vez de inventar |
+| 10 | `gestotrafic_precios_medios_columnas_turismo` | Añade `num_cilindros`, `potencia_kw` y `potencia_cv` (columnas reales del Anexo I) y retira `co2`, que el anexo no publica |
+| 11 | `gestotrafic_buscar_valor_base_turismo` | `gestotrafic_orden_vigente()` + búsqueda con `p_id` para fijar una versión concreta, filtrada por la Orden vigente |
+| 12 | `gestotrafic_precios_catalogo_turismo` | `..._marcas` / `..._modelos` / `..._versiones` para los desplegables, con `execute` solo para `authenticated` |
+| 13 | `gestotrafic_buscar_valor_base_solo_servidor` | Cierra el `execute` de las funciones de búsqueda a `anon` (las usa la Edge Function con `service_role`) |
+| 14 | `gestotrafic_precios_modelos_sin_duplicar_por_mayusculas` | El BOE escribe «MEGANE» y «Megane»: se agrupa sin distinguir caja para no ofrecer entradas duplicadas |
+
+## Carga de los turismos del Anexo I
+
+Las 61.634 filas de turismos **no van en una migración**: se cargan desde
+[`data/boe/anexo1-turismos-2026.tsv`](../../data/boe/), que es el volcado
+verificable del XML del BOE. El procedimiento completo (descarga, parseo y
+recarga anual) está en [`data/boe/README.md`](../../data/boe/README.md).
+
+La carga se hizo con la extensión `http` —instalada y **retirada** al terminar—
+leyendo el TSV desde el repositorio y comprobando los agregados (recuento,
+marcas, suma de importes y nulos por columna) contra el fichero de origen.

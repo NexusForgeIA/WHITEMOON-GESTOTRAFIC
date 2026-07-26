@@ -208,6 +208,33 @@
     return data;
   }
 
+  /* ---------------- Precios medios · Anexo I (turismos) ---------------- */
+
+  /* Catálogo para los desplegables marca → modelo → versión. Son RPC y no
+     consultas a la tabla porque hacen falta agrupaciones (`distinct`) que
+     PostgREST no expone, y porque así el filtro por la Orden vigente vive en
+     un único sitio del servidor. */
+
+  async function preciosMarcas() {
+    return unwrap(await sb.rpc('gestotrafic_precios_marcas'));
+  }
+
+  async function preciosModelos(marca) {
+    return unwrap(await sb.rpc('gestotrafic_precios_modelos', { p_marca: marca }));
+  }
+
+  /* Devuelve TODAS las versiones del modelo, no solo las que encajan con la
+     fecha: `en_periodo` marca cuáles corresponden al año de matriculación.
+     Si la fecha viene mal leída de la ficha, la versión correcta tiene que
+     seguir estando en la lista. */
+  async function preciosVersiones(marca, modelo, fechaMatriculacion) {
+    return unwrap(await sb.rpc('gestotrafic_precios_versiones', {
+      p_marca: marca,
+      p_modelo: modelo,
+      p_fecha_matriculacion: fechaMatriculacion || null
+    }));
+  }
+
   /* ---------------- Usuarios (gestores) ---------------- */
 
   /** El RLS decide qué se ve: el admin todos, un gestor solo su ficha.
@@ -358,6 +385,9 @@
     urlDocumento: urlDocumento,
     urlsDocumentos: urlsDocumentos,
     calcularITP: calcularITP,
+    preciosMarcas: preciosMarcas,
+    preciosModelos: preciosModelos,
+    preciosVersiones: preciosVersiones,
     analizarDocumentos: analizarDocumentos,
     subirArchivo: subirArchivo,
     registrarDocumento: registrarDocumento,
