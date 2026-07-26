@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Extrae los precios medios de turismos y todo terreno del Anexo I del BOE.
+"""Extrae del Anexo I del BOE los precios medios que se tarifan por modelo.
 
-    python data/boe/parse_anexo1.py data/boe/precios-medios-2026.xml \
-           data/boe/anexo1-turismos-2026.tsv
+    python data/boe/parse_anexo1.py <xml> turismo      data/boe/anexo1-turismos-2026.tsv
+    python data/boe/parse_anexo1.py <xml> autocaravana data/boe/anexo1-autocaravanas-2026.tsv
 
 Fuente: Orden HAC/1501/2025 (BOE-A-2025-26357), vigente desde el 1-1-2026.
 Descarga:
@@ -20,16 +20,22 @@ recarga anual no pase inadvertida.
 
 ESTRUCTURA DEL ANEXO I (verificada sobre el XML, no supuesta)
 ------------------------------------------------------------
-El documento trae 204 <table> con celdas reales (no imágenes). Las 112
-primeras son los turismos y todo terreno, una por marca ("Marca: ABARTH" …
-"Marca: ZHIDOU"). A partir de la 112 empieza otra sección —autocaravanas—,
-que reinicia el alfabeto y tiene su PROPIA tabla de depreciación en el
-Anexo IV, así que no se carga aquí.
+El documento trae 204 <table> con celdas reales (no imágenes), en este orden:
 
-Las 10 columnas de cada fila, en orden:
+    0-111    turismos y todo terreno, una tabla por marca (ABARTH … ZHIDOU)
+    112-188  autocaravanas, que reinician el alfabeto (ACE … WINGAMM)
+    189-192  motos eléctricas, motos de combustión, quads y buggys (por tramo)
+    193-203  Anexos II y III (náutica) y las tablas de depreciación
+
+Las dos primeras secciones se tarifan por marca/modelo y son las que saca este
+script. Comparten estructura: 10 columnas por fila, en orden
 
     0 Modelo-Tipo   1 Inicio   2 Fin   3 C.C.   4 N.º cilind.
     5 Tipo motor    6 P kW     7 cvf   8 cv     9 Valor euros
+
+pero **NO comparten depreciación**: el Anexo IV aplica a las autocaravanas una
+tabla propia de 18 tramos, distinta de la de 13 de los turismos. Por eso salen
+a ficheros separados y se cargan con `tipo_vehiculo` distinto.
 
 El punto es separador de millares tanto en el importe como en cv (los únicos
 cv con punto son 1.001, 1.020 y 1.080, de coches de más de 700 kW; el máximo
@@ -45,10 +51,21 @@ from collections import Counter
 #   G/D/M/S/Elc/H = Gasolina/Diésel/Etanol+Gasolina o Bio/Gasolina GLP/
 #                   Eléctrico/Hidrógeno
 #   PHEV = híbrido enchufable · GyE/DyE/SyE = híbridos no enchufables
+# (la sección de autocaravanas usa un subconjunto: no lista PHEV, H ni SyE)
 CODIGOS_MOTOR = {'G', 'D', 'M', 'S', 'Elc', 'H', 'PHEV', 'GyE', 'DyE', 'SyE'}
 
-PRIMERA_TABLA_TURISMO = 0
-ULTIMA_TABLA_TURISMO = 111          # inclusive; la 112 ya es autocaravanas
+# Ningún código difiere de otro solo por la caja, así que se puede reconocer
+# sin distinguirla. Hace falta: el BOE escribe 'd' en la VW California 1.9D.
+CODIGOS_POR_CAJA = {c.lower(): c for c in CODIGOS_MOTOR}
+
+# Límites de cada sección, ambos inclusive. Verificados contra los títulos del
+# propio documento: la 111 es "Marca: ZHIDOU" y justo después viene el epígrafe
+# "Precios medios de autocaravanas usadas…"; la 188 es "Marca: WINGAMM" y la
+# 189 ya es la tabla de ciclomotores eléctricos.
+SECCIONES = {
+    'turismo':      (0, 111),
+    'autocaravana': (112, 188),
+}
 
 COLUMNAS = ['marca', 'modelo', 'denominacion', 'periodo_desde', 'periodo_hasta',
             'cilindrada', 'num_cilindros', 'combustible', 'potencia_kw', 'cvf',
@@ -65,6 +82,7 @@ def limpiar(fragmento):
 class Extractor:
     def __init__(self):
         self.anomalias = []
+        self.normalizados = []      # códigos reconocidos salvando la caja
 
     def anota(self, ctx, campo, crudo, motivo):
         tabla, marca, fila = ctx
@@ -110,7 +128,8 @@ class Extractor:
         return None
 
 
-def extraer(ruta_xml):
+def extraer(ruta_xml, seccion):
+    primera, ultima = SECCIONES[seccion]
     data = io.open(ruta_xml, encoding='utf-8').read()
     cuerpo = data[data.find('<texto>'):]
     tablas = [m.group(0) for m in re.finditer(r'<table\b.*?</table>', cuerpo, re.S)]
@@ -119,7 +138,7 @@ def extraer(ruta_xml):
     filas = []
     descartadas = 0
 
-    for ti in range(PRIMERA_TABLA_TURISMO, ULTIMA_TABLA_TURISMO + 1):
+    for ti in range(primera, ultima + 1):
         if ti >= len(tablas):
             ex.anota((ti, '?', '-'), 'tabla', '', 'el documento tiene menos tablas de las esperadas')
             break
@@ -129,8 +148,8 @@ def extraer(ruta_xml):
         cabecera = limpiar(cabecera.group(1)) if cabecera else ''
         m = re.fullmatch(r'Marca:\s*(.+)', cabecera)
         if not m:
-            # Si esto salta, la sección de turismos ya no acaba en la tabla 111:
-            # hay que volver a mirar el documento antes de cargar nada.
+            # Si esto salta, los límites de la sección han cambiado en la Orden
+            # nueva: hay que volver a mirar el documento antes de cargar nada.
             ex.anota((ti, '?', '-'), 'cabecera', cabecera, 'la tabla no declara una marca')
             continue
         marca = m.group(1).strip()
@@ -157,8 +176,14 @@ def extraer(ruta_xml):
 
             motor = celdas[5]
             if motor not in CODIGOS_MOTOR:
-                ex.anota(ctx, 'tipo_motor', motor, 'código fuera de la leyenda del anexo')
-                motor = None
+                canonico = CODIGOS_POR_CAJA.get(motor.lower())
+                if canonico:
+                    # Solo cambia la caja: el código sigue siendo el del BOE.
+                    ex.normalizados.append(f'{marca} · {celdas[0]}: {motor!r} -> {canonico!r}')
+                    motor = canonico
+                else:
+                    ex.anota(ctx, 'tipo_motor', motor, 'código fuera de la leyenda del anexo')
+                    motor = None
 
             valor = ex.millares(celdas[9], ctx, 'valor', obligatorio=True)
             if valor is None:
@@ -185,7 +210,7 @@ def extraer(ruta_xml):
                 'valor_base_euros': valor,
             })
 
-    return filas, descartadas, ex.anomalias
+    return filas, descartadas, ex
 
 
 def escribir_tsv(filas, ruta):
@@ -196,12 +221,14 @@ def escribir_tsv(filas, ruta):
 
 
 def main():
-    if len(sys.argv) != 3:
+    if len(sys.argv) != 4 or sys.argv[2] not in SECCIONES:
         print(__doc__)
+        print(f'Secciones válidas: {", ".join(SECCIONES)}')
         return 2
-    ruta_xml, ruta_tsv = sys.argv[1], sys.argv[2]
+    ruta_xml, seccion, ruta_tsv = sys.argv[1], sys.argv[2], sys.argv[3]
 
-    filas, descartadas, anomalias = extraer(ruta_xml)
+    filas, descartadas, ex = extraer(ruta_xml, seccion)
+    anomalias = ex.anomalias
 
     # Ninguna denominación puede llevar tabulador o salto: rompería el TSV.
     for fila in filas:
@@ -211,6 +238,7 @@ def main():
     escribir_tsv(filas, ruta_tsv)
 
     marcas = sorted({f['marca'] for f in filas})
+    print(f'Sección        : {seccion} (tablas {SECCIONES[seccion][0]}-{SECCIONES[seccion][1]})')
     print(f'Filas          : {len(filas)}')
     print(f'Descartadas    : {descartadas}')
     print(f'Marcas         : {len(marcas)}')
@@ -218,6 +246,12 @@ def main():
     print(f'Valor min/max  : {min(f["valor_base_euros"] for f in filas)} / '
           f'{max(f["valor_base_euros"] for f in filas)}')
     print(f'Salida         : {ruta_tsv}')
+
+    if ex.normalizados:
+        # No es una anomalía —el código es el del BOE— pero se deja constancia.
+        print(f'\nCódigos de motor normalizados de caja ({len(ex.normalizados)}):')
+        for n in ex.normalizados[:20]:
+            print('  ' + n)
 
     if anomalias:
         print(f'\nANOMALÍAS ({len(anomalias)}) — revisar antes de cargar:')
