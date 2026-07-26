@@ -1,3 +1,7 @@
 node_modules/
 .DS_Store
 Thumbs.db
+
+# XML original del BOE (42 MB). Se rebaja con el curl de data/boe/README.md;
+# lo que se versiona es el TSV parseado, que es lo que se carga.
+data/boe/*.xml
