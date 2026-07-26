@@ -113,6 +113,15 @@ function perfilDe(tipo: string): string | null {
 
 const nulable = (t: string) => ({ anyOf: [{ type: t }, { type: 'null' }] });
 
+/* La API limita a 16 los parámetros con unión (`anyOf`) por esquema. Con dos
+   por campo (valor y nota) más la observación, la ficha técnica —8 campos— se
+   iba a 17 y TODA lectura de fichas fallaba con un 400.
+
+   Nullable se queda solo donde significa algo: `valor: null` es "esto no lo he
+   leído con claridad", que es la pieza central de la regla anti-invención. La
+   nota y la observación pasan a cadena, vacía cuando no hay nada que decir:
+   son texto de apoyo y la diferencia entre "" y null no aporta. Así son 8
+   uniones y quedan campos de sobra para crecer. */
 function esquema(perfil: string) {
   const campos = PERFILES[perfil].campos;
   const props: Record<string, unknown> = {};
@@ -122,7 +131,7 @@ function esquema(perfil: string) {
       properties: {
         valor: nulable('string'),
         confianza: { type: 'string', enum: ['alta', 'media', 'baja'] },
-        nota: nulable('string')
+        nota: { type: 'string' }
       },
       required: ['valor', 'confianza', 'nota'],
       additionalProperties: false
@@ -138,7 +147,7 @@ function esquema(perfil: string) {
         additionalProperties: false
       },
       legible: { type: 'boolean' },
-      observacion: nulable('string')
+      observacion: { type: 'string' }
     },
     required: ['campos', 'legible', 'observacion'],
     additionalProperties: false
@@ -169,8 +178,8 @@ Confianza:
 - "media": se lee, pero hay algún carácter dudoso o el formato no es el esperado.
 - "baja": no se lee, no aparece, o no estás seguro. En este caso el valor debe ser null.
 
-En "nota" explica en pocas palabras por qué un campo es dudoso o falta. Déjalo en null si el campo salió limpio.
-En "legible" indica si el documento se puede leer en general. En "observacion" señala si el documento no es del tipo esperado.
+En "nota" explica en pocas palabras por qué un campo es dudoso o falta. Déjala vacía ("") si el campo salió limpio.
+En "legible" indica si el documento se puede leer en general. En "observacion" señala si el documento no es del tipo esperado, o déjala vacía ("").
 
 Responde solo con el JSON del esquema.`;
 }

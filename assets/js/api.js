@@ -208,6 +208,29 @@
     return data;
   }
 
+  /**
+   * Propone el valor base del Anexo I con lo que Gest-IA leyó de la ficha.
+   * Devuelve `{ estado, candidatos, fila, total, ... }`. `estado` vale
+   * `propuesta` (una sola fila), `varios` (hay que elegir), `sin_match`,
+   * `sin_datos` o `error`. Nunca devuelve un importe que no esté en la tabla.
+   */
+  async function proponerValorBase(datos) {
+    var res = await fetch(C.SUPABASE_URL + '/functions/v1/' + C.FN_VALOR_BASE, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': C.SUPABASE_ANON_KEY,
+        // Con el token del gestor: la función identifica al usuario antes de
+        // consultar, no le vale la clave anon.
+        'Authorization': 'Bearer ' + (global.GTAuth.getToken() || C.SUPABASE_ANON_KEY)
+      },
+      body: JSON.stringify(datos)
+    });
+    var data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'No se pudo consultar el Anexo I');
+    return data;
+  }
+
   /* ---------------- Precios medios · Anexo I (turismos) ---------------- */
 
   /* Catálogo para los desplegables marca → modelo → versión. Son RPC y no
@@ -394,6 +417,7 @@
     urlDocumento: urlDocumento,
     urlsDocumentos: urlsDocumentos,
     calcularITP: calcularITP,
+    proponerValorBase: proponerValorBase,
     preciosMarcas: preciosMarcas,
     preciosModelos: preciosModelos,
     preciosVersiones: preciosVersiones,

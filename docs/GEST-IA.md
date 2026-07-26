@@ -66,15 +66,54 @@ igualdad, el primero. **Un `null` nunca pisa un valor leído.**
 
 ### 3 · El ITP
 
-Se calcula solo con el motor real `gestotrafic-itp` en cuanto termina la lectura.
-Necesita dos datos que **no están en ningún documento**:
+Se calcula con el motor real `gestotrafic-itp` en cuanto el gestor confirma el
+valor base. Hacen falta dos datos que **no están en ningún documento**:
 
-- **valor BOE (Anexo I)** — sale de la tabla de precios medios
-- **CCAA del comprador** — es una decisión, no un dato del papel
+- **valor BOE (Anexo I)** — Gest-IA lo **propone** desde la tabla de precios
+  medios; la versión la confirma el gestor
+- **CCAA del comprador** — es una decisión, no un dato del papel: la elige el
+  gestor en la pantalla de subida
 
-Los dos se piden al gestor en la pantalla de subida, señalados como tales. El
-precio de contrato y la fecha de matriculación sí salen de los documentos, así
-que el cálculo se completa sin más intervención.
+También se pide ahí el **tipo de vehículo**, porque decide en qué tabla del
+Anexo I se busca (y con qué tabla del Anexo IV se deprecia). No se deduce del
+documento.
+
+El precio de contrato y la fecha de matriculación sí salen de los documentos.
+
+#### Cómo se propone el valor base
+
+Terminada la lectura, `gestotrafic-valor-base` busca en
+`gestotrafic_precios_medios` con lo que Gest-IA leyó. Vive en el servidor
+porque las funciones de búsqueda solo tienen `execute` para `authenticated` y
+`service_role`, y las ~71.000 filas no tienen por qué bajar al navegador.
+
+En **motos, quads y buggys** el Anexo I tarifa por tramo: sale una fila o
+ninguna, no hay nada que elegir.
+
+En **turismos y autocaravanas** se parte de todas las versiones del modelo
+vigentes en el año de matriculación y se estrecha con lo leído de la ficha:
+cilindrada, combustible y las palabras del modelo. Dos detalles que importan:
+
+- Se compara **por palabras sueltas, no por subcadena**: el BOE escribe
+  «GOLF VII 1.5 TSI EVO Advance 5p» y una ficha que ponga «Golf 1.5 TSI» no
+  aparece como subcadena por culpa del «VII».
+- **Un filtro que deje la lista vacía se descarta.** Si la cilindrada viene mal
+  leída, es preferible ofrecer de más que esconder la versión correcta.
+
+Con un Golf de 2018 eso baja de 614 versiones del modelo a 26, y a 2 si la
+ficha trae la denominación completa.
+
+Y entonces, siempre:
+
+| Resultado | Qué pasa |
+|---|---|
+| 1 versión | se **propone** preseleccionada; el gestor la confirma |
+| varias | se ofrecen **sin seleccionar ninguna**; elige el gestor |
+| ninguna | el campo se queda **manual**, sin inventar nada |
+
+El expediente ya está creado y en `pendiente_validacion` antes de este paso, así
+que el gestor puede saltárselo y rellenar el valor base luego en la calculadora
+del expediente. **Nada se calcula sin que una persona haya fijado la fila.**
 
 #### Por qué Gest-IA no elige la versión
 

@@ -1916,19 +1916,31 @@
             <div class="form-sec">Fiscalidad</div>
             <div class="empresa-note">
               ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
-              <div>El <b>valor BOE</b> no está en ningún documento: sale de la tabla de precios medios
-                del Anexo I. Lo aporta el gestor. Con él, Gest-IA calcula el ITP en cuanto termina de leer.</div>
+              <div>El <b>valor BOE</b> no está en ningún documento: sale de la tabla de precios
+                medios del Anexo I. <b>Gest-IA lo propone desde ahí</b> con lo que lea de la ficha
+                técnica y <b>tú confirmas la versión</b> antes de calcular — dos versiones del mismo
+                modelo pueden costar mil euros de diferencia. La <b>CCAA</b> sí la eliges tú: es una
+                decisión, no un dato del papel.</div>
             </div>
             <div class="form-grid">
               <div class="field">
-                <label for="f-boe-ia">Valor BOE Anexo I (€)</label>
-                <input type="number" step="0.01" min="0" id="f-boe-ia" name="valor_boe" placeholder="21000">
+                <label for="f-tipo-ia">Tipo de vehículo</label>
+                <select id="f-tipo-ia" name="tipo_vehiculo">
+                  ${window.GT_TIPOS_VEHICULO.map(t => `<option value="${h(t.id)}">${h(t.label)}</option>`).join('')}
+                </select>
+                <small class="field-hint">Decide en qué tabla del Anexo I se busca. No se deduce del documento.</small>
               </div>
               <div class="field">
                 <label for="f-ccaa-ia">CCAA del comprador</label>
                 <select id="f-ccaa-ia" name="ccaa">
                   ${window.GT_CCAA.map(c => `<option ${c === 'Comunidad de Madrid' ? 'selected' : ''}>${h(c)}</option>`).join('')}
                 </select>
+              </div>
+              <div class="field">
+                <label for="f-boe-ia">Valor BOE Anexo I (€) <span class="t-muted" style="font-weight:400">· opcional</span></label>
+                <input type="number" step="0.01" min="0" id="f-boe-ia" name="valor_boe"
+                       placeholder="lo propone Gest-IA">
+                <small class="field-hint">Si lo rellenas, manda sobre lo que proponga Gest-IA.</small>
               </div>
             </div>` : ''}
 
@@ -1997,7 +2009,8 @@
     btn.addEventListener('click', () => lanzarGestIA(tr, elegidos, {
       cliente_id: val(view, 'cliente_id'),
       valor_boe: view.querySelector('#f-boe-ia') ? num(view, 'valor_boe') : null,
-      ccaa: view.querySelector('#f-ccaa-ia') ? val(view, 'ccaa') : null
+      ccaa: view.querySelector('#f-ccaa-ia') ? val(view, 'ccaa') : null,
+      tipo_vehiculo: view.querySelector('#f-tipo-ia') ? val(view, 'tipo_vehiculo') : null
     }));
   }
 
@@ -2097,29 +2110,36 @@
       cambios.ia_modelo = lectura.modelo;
       await GTApi.actualizarExpediente(exp.id, cambios);
 
-      // 4 · ITP, si el trámite lo lleva y hay con qué calcularlo.
-      if (tr.calculo === 'itp' && extra.valor_boe && cambios.fecha_matriculacion) {
+      /* 4 · Valor base del Anexo I. Gest-IA lo PROPONE desde la tabla; la fila
+         concreta la confirma el gestor antes de que se calcule nada. El valor
+         que haya escrito a mano manda y se salta la confirmación. */
+      let vb = null;
+      if (tr.calculo === 'itp' && !extra.valor_boe) {
         try {
-          const r = await GTApi.calcularITP({
-            valor_boe: extra.valor_boe,
-            precio_contrato: cambios.precio_contrato || null,
-            fecha_matriculacion: cambios.fecha_matriculacion,
-            fecha_transmision: new Date().toISOString().slice(0, 10),
-            ccaa: extra.ccaa || 'Comunidad de Madrid',
+          vb = await GTApi.proponerValorBase({
+            tipo_vehiculo: extra.tipo_vehiculo || 'coche',
+            marca: cambios.marca || null,
+            modelo: cambios.modelo || null,
+            fecha_matriculacion: cambios.fecha_matriculacion || null,
             cilindrada: cambios.cilindrada || null,
-            cvf: cambios.cvf || null,
-            etiqueta_dgt: cambios.etiqueta_dgt || '',
-            uso_especial: false,
-            tipo_vehiculo: 'coche'
-          });
-          await GTApi.actualizarExpediente(exp.id, {
-            valor_venal: r.valor_venal, base_imponible: r.base_imponible,
-            itp_importe: r.itp, tasa_dgt: r.tasa_dgt, total_impuestos: r.total_impuestos,
-            calculo_json: r, calculado_at: new Date().toISOString()
+            combustible: cambios.combustible || null
           });
         } catch (e) {
-          console.warn('Gest-IA: no se pudo calcular el ITP', e);
+          // Que falle la propuesta no tumba el alta: queda el campo manual.
+          console.warn('Gest-IA: no se pudo consultar el Anexo I', e);
         }
+      }
+
+      const proponible = vb && (vb.estado === 'propuesta' || vb.estado === 'varios');
+
+      if (proponible) {
+        await confirmarValorBase(tr, exp, cambios, extra, vb);
+        return;
+      }
+
+      // Sin propuesta utilizable: se calcula solo si el gestor puso el valor.
+      if (tr.calculo === 'itp' && extra.valor_boe && cambios.fecha_matriculacion) {
+        await calcularYGuardarITP(exp, cambios, extra, { valor_boe: extra.valor_boe });
       }
 
       toast('Gest-IA montó ' + exp.referencia + ' · pendiente de validación', 'ok');
@@ -2136,6 +2156,152 @@
           : '<a class="btn btn-ghost" href="#/gest-ia">Volver a intentarlo</a>'}
         </div>`;
     }
+  }
+
+  /* Calcula el ITP y lo guarda. `base` fija de dónde sale el valor: un
+     importe manual (`valor_boe`) o una fila del Anexo I (`valor_base_id`).
+     Nunca las dos: si van las dos, el motor respeta el manual y no consulta
+     la tabla. */
+  async function calcularYGuardarITP(exp, cambios, extra, base) {
+    try {
+      const r = await GTApi.calcularITP(Object.assign({
+        precio_contrato: cambios.precio_contrato || null,
+        fecha_matriculacion: cambios.fecha_matriculacion,
+        fecha_transmision: new Date().toISOString().slice(0, 10),
+        ccaa: extra.ccaa || 'Comunidad de Madrid',
+        cilindrada: cambios.cilindrada || null,
+        cvf: cambios.cvf || null,
+        etiqueta_dgt: cambios.etiqueta_dgt || '',
+        uso_especial: false,
+        tipo_vehiculo: base.tipo_vehiculo || 'coche'
+      }, base));
+
+      await GTApi.actualizarExpediente(exp.id, {
+        valor_boe: r.detalle ? r.detalle.valor_boe : (base.valor_boe || null),
+        valor_venal: r.valor_venal, base_imponible: r.base_imponible,
+        itp_importe: r.itp, tasa_dgt: r.tasa_dgt, total_impuestos: r.total_impuestos,
+        calculo_json: r, calculado_at: new Date().toISOString()
+      });
+      return r;
+    } catch (e) {
+      console.warn('Gest-IA: no se pudo calcular el ITP', e);
+      return null;
+    }
+  }
+
+  /* Pantalla intermedia del alta con Gest-IA: la IA ha encontrado precio(s) en
+     el Anexo I y hace falta que una persona diga cuál. Con una sola fila viene
+     preseleccionada como propuesta; con varias NO se selecciona ninguna. */
+  async function confirmarValorBase(tr, exp, cambios, extra, vb) {
+    const unica = vb.estado === 'propuesta';
+    const cands = vb.candidatos || [];
+    const porTramo = vb.criterio === 'tramo';
+
+    const etiqueta = (c) => porTramo
+      ? `${c.tramo_etiqueta} — ${eur(c.valor_base)}`
+      : `${c.denominacion} — ${[c.periodo_desde ? c.periodo_desde + (c.periodo_hasta ? '-' + c.periodo_hasta : '→') : null,
+            c.cilindrada ? c.cilindrada + 'cc' : null, c.combustible,
+            c.potencia_kw ? c.potencia_kw + 'kW' : null].filter(Boolean).join(' · ')} — ${eur(c.valor_base)}`;
+
+    view.innerHTML = `
+      ${cabecera()}
+      <div class="page-head">
+        <div>
+          <h1 style="margin-top:6px">${svg(ICO_IA, 'h1-ico')} Confirma el valor base</h1>
+          <p>${h(exp.referencia)} · Gest-IA ya leyó los documentos. Falta que fijes la versión.</p>
+        </div>
+      </div>
+
+      <div class="stack" style="max-width:820px">
+        <div class="card">
+          <div class="card-t">Lo que leyó Gest-IA</div>
+          <dl class="dl">
+            <dt>Marca / modelo</dt><dd>${h([cambios.marca, cambios.modelo].filter(Boolean).join(' ') || '—')}</dd>
+            <dt>1ª matriculación</dt><dd>${fecha(cambios.fecha_matriculacion)}</dd>
+            <dt>Cilindrada</dt><dd>${cambios.cilindrada ? h(cambios.cilindrada) + ' c.c.' : '—'}</dd>
+            <dt>Combustible</dt><dd>${h(cambios.combustible || '—')}</dd>
+            <dt>Tipo de vehículo</dt><dd>${h((window.GT_TIPOS_VEHICULO
+              .find(t => t.id === (extra.tipo_vehiculo || 'coche')) || {}).label || '—')}
+              <span class="t-muted" style="font-size:.76rem">· lo indicaste tú</span></dd>
+          </dl>
+
+          <div class="form-sec" style="margin-top:18px">Precio medio del Anexo I</div>
+          ${unica
+            ? `<div class="boe-propuesta">
+                 ${svg('<path d="M12 2l2.4 6.9H22l-6 4.3 2.3 6.8-6.3-4.4-6.3 4.4L8 13.2l-6-4.3h7.6z"/>')}
+                 <div>Gest-IA propone <b>una única coincidencia</b>${porTramo
+                   ? ' por tramo de cilindrada: en motos y quads el Anexo I no tiene versiones que elegir.'
+                   : `, filtrando ${vb.del_modelo} versiones del modelo por lo que leyó de la ficha.`}
+                   Revísala y confírmala.</div>
+               </div>`
+            : `<div class="boe-propuesta sin-match">
+                 ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
+                 <div>Encajan <b>${vb.total} versiones</b> con <b>precios distintos</b>
+                   (de las ${vb.del_modelo} del modelo). <b>Gest-IA no elige</b>: mira los kW y el
+                   acabado en la ficha técnica y elige tú.
+                   ${vb.palabras_usadas < vb.palabras_leidas
+                     ? ' Ojo: ninguna versión llevaba todas las palabras del modelo leído, así que la lista es más amplia.' : ''}
+                   ${vb.recortado
+                     ? ` Se muestran ${cands.length} de ${vb.total}: si ninguna es, usa el valor manual.` : ''}</div>
+               </div>`}
+
+          <div class="field">
+            <label for="f-vb">Versión del Anexo I</label>
+            <select id="f-vb">
+              <option value="">— elige la versión —</option>
+              ${cands.map(c => `<option value="${h(c.id)}" ${unica ? 'selected' : ''}>${h(etiqueta(c))}</option>`).join('')}
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="f-vb-manual">…o introduce el valor base a mano (€)</label>
+            <input type="number" step="0.01" min="0" id="f-vb-manual" placeholder="21000">
+            <small class="field-hint">Si escribes un importe, manda sobre la versión elegida.</small>
+          </div>
+        </div>
+
+        <div class="regul-note">
+          ${svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>')}
+          <div>El expediente <b>${h(exp.referencia)}</b> ya está creado y <b>pendiente de
+            validación</b>. Puedes saltarte este paso: el valor base queda vacío y lo rellenas
+            luego en la calculadora del expediente.</div>
+        </div>
+
+        <div class="flex">
+          <button class="btn" id="btn-vb">Confirmar y calcular ITP</button>
+          <button class="btn btn-ghost" id="btn-vb-saltar">Seguir sin valor base</button>
+        </div>
+      </div>
+      ${footer()}`;
+
+    const irAlExpediente = (msg, tono) => {
+      toast(msg, tono || 'ok');
+      location.hash = '#/expedientes/' + exp.id;
+    };
+
+    view.querySelector('#btn-vb-saltar').addEventListener('click', () =>
+      irAlExpediente('Gest-IA montó ' + exp.referencia + ' · falta el valor base', 'ok'));
+
+    view.querySelector('#btn-vb').addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      const manual = Number(view.querySelector('#f-vb-manual').value) || null;
+      const id = view.querySelector('#f-vb').value || null;
+      if (!manual && !id) { toast('Elige una versión o escribe el valor base', 'err'); return; }
+      if (!cambios.fecha_matriculacion) {
+        irAlExpediente('Falta la fecha de matriculación: completa el ITP en el expediente', 'err');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>';
+      const r = await calcularYGuardarITP(exp, cambios, extra, manual
+        ? { valor_boe: manual, tipo_vehiculo: vb.tipo_vehiculo === 'autocaravana' ? 'autocaravana' : 'coche' }
+        : { valor_base_id: id, tipo_vehiculo: vb.tipo_vehiculo === 'turismo' ? 'coche' : vb.tipo_vehiculo });
+
+      irAlExpediente(r
+        ? 'ITP calculado · ' + exp.referencia + ' pendiente de validación'
+        : 'No se pudo calcular el ITP: revísalo en el expediente', r ? 'ok' : 'err');
+    });
   }
 
   /* ============================================================

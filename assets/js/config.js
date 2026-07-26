@@ -26,6 +26,11 @@ window.GT_CONFIG = {
   // Gest-IA · lectura de documentos con Claude (visión)
   FN_GESTIA: 'gestia-extraer',
 
+  /* Propone el valor base del Anexo I con lo que Gest-IA leyó de la ficha.
+     Va por Edge Function porque las búsquedas solo tienen `execute` en el
+     servidor y las ~71.000 filas no tienen por qué bajar al navegador. */
+  FN_VALOR_BASE: 'gestotrafic-valor-base',
+
   // Datos de la gestoría que aparecen en el contrato generado
   GESTORIA: {
     nombre: 'GestoTrafic · Gestoría de Tráfico',
