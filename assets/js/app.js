@@ -704,8 +704,16 @@
      VISTA · LISTA DE EXPEDIENTES (con filtro por tipo)
      ============================================================ */
   let filtroTipo = 'todos';
+  let termino = '';          // término de búsqueda vigente en la vista
 
-  async function vistaExpedientes() {
+  /* Misma normalización que `gestotrafic_normalizar_busqueda` en el servidor.
+     Aquí solo decide cuándo merece la pena consultar; quien busca de verdad
+     —y quien aplica el RLS— es el servidor. */
+  const normalizarBusqueda = (s) => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+  async function vistaExpedientes(q) {
+    // `#/expedientes?q=4821NBH` deja la búsqueda enlazable y compartible.
+    if (q !== undefined && q !== null) termino = q;
     loading('Cargando expedientes…');
     const [todos] = await Promise.all([GTApi.listarExpedientes(), cargarGestores()]);
     const verGestor = GTAuth.isAdmin();
@@ -750,7 +758,15 @@
         <button class="btn" id="btn-nuevo-exp">+ Nuevo expediente</button>
       </div>
 
-      <div class="filtro-bar">
+      <div class="buscador-exp">
+        ${svg('<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>', 'lupa')}
+        <input id="busca-exp" type="search" autocomplete="off" value="${h(termino)}"
+               placeholder="Buscar por matrícula o DNI/NIF…  ·  4821 NBH · 71640935D">
+        <button class="btn-limpiar hidden" id="limpia-busca" title="Limpiar búsqueda"
+                aria-label="Limpiar búsqueda">${svg('<path d="M18 6L6 18M6 6l12 12"/>')}</button>
+      </div>
+
+      <div class="filtro-bar" data-filtro-bar>
         <span class="t-muted" style="font-size:.78rem">Filtrar por trámite</span>
         <select id="filtro-tipo">
           <option value="todos">Todos los trámites (${todos.length})</option>
@@ -766,7 +782,78 @@
 
     view.querySelector('#btn-nuevo-exp').addEventListener('click', () => (location.hash = '#/expedientes/nuevo'));
     view.querySelector('#filtro-tipo').addEventListener('change', (e) => { filtroTipo = e.target.value; pintar(); });
-    pintar();
+
+    /* ---- Búsqueda por matrícula o documento ----
+       La consulta la resuelve el servidor (`gestotrafic_buscar_expedientes`),
+       que normaliza el término y deja el filtrado por gestor al RLS. Aquí no
+       se filtra nada: si se buscara en la lista ya cargada, solo se
+       encontraría lo que cupo en la primera página. */
+    const input   = view.querySelector('#busca-exp');
+    const limpiar = view.querySelector('#limpia-busca');
+    const barra   = view.querySelector('[data-filtro-bar]');
+    let peticion  = 0;
+    let tecleo    = null;
+
+    async function buscar(q) {
+      termino = q;
+      limpiar.classList.toggle('hidden', !q);
+      barra.classList.toggle('hidden', !!q);
+
+      if (!q) return pintar();
+      if (normalizarBusqueda(q).length < 3) {
+        view.querySelector('#lista-exp').innerHTML =
+          `<div class="empty"><p class="t-muted">Escribe al menos 3 caracteres.</p></div>`;
+        view.querySelector('#cuenta-exp').textContent = 'buscando…';
+        return;
+      }
+
+      const mio = ++peticion;
+      try {
+        const res = await GTApi.buscarExpedientes(q);
+        if (mio !== peticion) return;      // llegó una respuesta más nueva
+        pintarBusqueda(res, q);
+      } catch (err) {
+        if (mio !== peticion) return;
+        view.querySelector('#lista-exp').innerHTML =
+          `<div class="empty"><p style="color:var(--danger)">${h(err.message || 'No se pudo buscar')}</p></div>`;
+      }
+    }
+
+    function pintarBusqueda(res, q) {
+      const cont = view.querySelector('#lista-exp');
+      view.querySelector('#cuenta-exp').textContent =
+        `${res.length} resultado${res.length === 1 ? '' : 's'} para «${q}»`;
+
+      cont.innerHTML = res.length ? `<div class="table-wrap"><table>
+        <thead><tr><th>Referencia</th><th>Matrícula</th><th>Cliente</th><th>Trámite</th><th>Vehículo</th><th>Estado</th><th>Coincide en</th></tr></thead>
+        <tbody>${res.map(e => `
+          <tr class="clickable" data-exp="${h(e.id)}">
+            <td class="t-mono">${h(e.referencia)}</td>
+            <td class="t-mono"><b>${h(e.matricula || '—')}</b></td>
+            <td>${h(e.cliente || '— sin cliente —')}</td>
+            <td><span class="badge badge-tramite">${h(T.tramite(e.tipo_tramite).corto)}</span></td>
+            <td>${h([e.marca, e.modelo].filter(Boolean).join(' ') || '—')}</td>
+            <td><span class="badge badge-${h(e.estado)}">${h(estadoInfo(e.estado).label)}</span></td>
+            <td class="t-muted" style="font-size:.76rem">${e.coincide_en === 'matricula' ? 'matrícula' : 'documento'}</td>
+          </tr>`).join('')}</tbody></table></div>`
+        : `<div class="empty">
+            ${svg('<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>')}
+            <p>Ningún expediente <b>tuyo</b> con «${h(q)}».</p>
+            <p class="t-muted" style="font-size:.82rem">Se busca por matrícula y por DNI/NIF/CIF.
+              Da igual cómo escribas los espacios o los guiones.</p>
+          </div>`;
+
+      cont.querySelectorAll('[data-exp]').forEach(tr =>
+        tr.addEventListener('click', () => (location.hash = '#/expedientes/' + tr.dataset.exp)));
+    }
+
+    input.addEventListener('input', () => {
+      clearTimeout(tecleo);
+      tecleo = setTimeout(() => buscar(input.value.trim()), 300);
+    });
+    limpiar.addEventListener('click', () => { input.value = ''; buscar(''); input.focus(); });
+
+    if (termino) buscar(termino); else pintar();
   }
 
   /* ============================================================
@@ -2878,7 +2965,7 @@
         } else if (partes[1]) {
           await vistaExpediente(partes[1]);
         } else {
-          await vistaExpedientes();
+          await vistaExpedientes(params.get('q'));
         }
       } else if (seccion === 'calculadora') {
         await vistaCalculadoraITP();

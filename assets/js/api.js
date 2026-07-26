@@ -180,6 +180,19 @@
     return mapa;
   }
 
+  /**
+   * Busca expedientes por matrícula o por DNI/NIF/CIF, con un solo término.
+   * Normaliza en el servidor: «4821 NBH», «4821-NBH» y «4821nbh» son lo mismo.
+   *
+   * El filtrado por gestor NO se hace aquí: la función es SECURITY INVOKER y
+   * el RLS de `gestotrafic_expedientes` decide qué filas se ven, igual que en
+   * el resto del CRM. Aunque se manipulase este fichero, el servidor no
+   * devolvería expedientes de otro gestor.
+   */
+  async function buscarExpedientes(termino) {
+    return unwrap(await sb.rpc('gestotrafic_buscar_expedientes', { p_termino: termino }));
+  }
+
   /* ---------------- Cálculo ITP ---------------- */
 
   /**
@@ -407,6 +420,7 @@
     actualizarExpediente: actualizarExpediente,
     reasignarExpediente: reasignarExpediente,
     borrarExpediente: borrarExpediente,
+    buscarExpedientes: buscarExpedientes,
     listarUsuarios: listarUsuarios,
     crearGestor: crearGestor,
     cambiarClave: cambiarClave,
