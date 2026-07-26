@@ -77,7 +77,8 @@ const PERFILES: Record<string, { titulo: string; campos: Record<string, Campo> }
       matricula:           { etiqueta: 'Matrícula',        pista: 'Campo A. Formato 1234 ABC o el antiguo M-1234-AB.' },
       fecha_matriculacion: { etiqueta: '1ª matriculación', pista: 'Campo B. Devuélvela en formato AAAA-MM-DD.' },
       combustible:         { etiqueta: 'Combustible',      pista: 'Campo P.3. Normaliza a: Gasolina, Diésel, Híbrido, Híbrido enchufable, Eléctrico, GLP o GNC.' },
-      cvf:                 { etiqueta: 'Potencia fiscal',  pista: 'Campo 7 o "CVF". Número con decimales, p. ej. 11,5. Devuelve el número con punto decimal.' }
+      cvf:                 { etiqueta: 'Potencia fiscal',  pista: 'Campo 7 o "CVF". Número con decimales, p. ej. 11,5. Devuelve el número con punto decimal.' },
+      cilindrada:          { etiqueta: 'Cilindrada',       pista: 'Campo P.1, en c.c. Solo el número entero. En un vehículo eléctrico no existe: devuelve null.' }
     }
   },
   permiso: {

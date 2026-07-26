@@ -753,6 +753,21 @@ tbody tr.clickable:hover { background: rgba(124, 77, 255, .07); }
 }
 .itp-exento-nota b { color: #d6fff4; }
 
+/* ---------------- Valor base del Anexo I ---------------- */
+/* Campo que rellena la tabla de precios medios: se lee, no se escribe. */
+.field.boe-auto input {
+  background: rgba(0, 212, 170, .07);
+  border-color: rgba(0, 212, 170, .26);
+  cursor: default;
+}
+.boe-sello {
+  display: inline-block;
+  margin-left: 7px; padding: 1px 8px; border-radius: 99px;
+  background: rgba(0, 212, 170, .15); color: var(--g);
+  font-size: .62rem; font-weight: 800; letter-spacing: .03em;
+  text-transform: uppercase; white-space: nowrap;
+}
+
 /* ---------------- Gest-IA ---------------- */
 .h1-ico { width: 26px; height: 26px; color: var(--p2); vertical-align: -3px; margin-right: 4px; }
 .nav-ia svg { color: var(--p2); }

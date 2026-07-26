@@ -50,6 +50,19 @@ window.GT_CCAA = [
   'Murcia', 'Navarra', 'País Vasco'
 ];
 
+/* Tipos de vehículo a efectos del Anexo I.
+   Los que NO son turismo se tarifan por TRAMO de cilindrada (o de kW en
+   eléctricas), así que su valor base se busca solo en
+   gestotrafic_precios_medios. El turismo va por marca/modelo/versión y
+   hoy sigue pidiendo el valor a mano: falta el fichero del Anexo I. */
+window.GT_TIPOS_VEHICULO = [
+  { id: 'coche',          label: 'Turismo',          auto: false, por: null },
+  { id: 'moto',           label: 'Motocicleta',      auto: true,  por: 'cilindrada' },
+  { id: 'moto_electrica', label: 'Moto eléctrica',   auto: true,  por: 'kw' },
+  { id: 'quad',           label: 'Quad',             auto: true,  por: 'cilindrada' },
+  { id: 'buggy',          label: 'Buggy',            auto: true,  por: 'cilindrada' }
+];
+
 /* Etiquetas DGT · las usa el panel de cálculo ITP */
 window.GT_ETIQUETAS = [
   { id: '',    label: 'Sin etiqueta / no aplica' },

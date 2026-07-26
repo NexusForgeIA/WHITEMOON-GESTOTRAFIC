@@ -24,6 +24,7 @@
       fecha_matriculacion: 'fecha_matriculacion',
       combustible:         'combustible',
       cvf:                 'cvf',
+      cilindrada:          'cilindrada',
       bastidor:            'bastidor'
     },
     permiso: {
@@ -132,6 +133,7 @@
         let valor = dato.valor;
         if (campo === 'combustible') valor = combustible(valor);
         if (campo === 'precio_contrato' || campo === 'cvf') valor = numero(valor);
+        if (campo === 'cilindrada') { const n = numero(valor); valor = n === null ? null : Math.round(n); }
 
         proponer(campo, valor, dato.confianza, doc.tipo, dato.nota);
       });

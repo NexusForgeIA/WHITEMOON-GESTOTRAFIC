@@ -18,3 +18,6 @@ Todo vive bajo el prefijo `gestotrafic_*`. La única referencia fuera de él es
 
 > El esquema de la Fase 1 (clientes, expedientes, documentos, secuencia de
 > referencias y bucket) es anterior a este repositorio y ya estaba aplicado.
+| 7 | `gestotrafic_precios_medios` | Tabla de precios medios del Anexo I (turismos por marca/modelo, resto por tramo) + RLS de solo lectura |
+| 8 | `gestotrafic_precios_medios_carga_tramos` | Carga de los 45 tramos reales de motos, quads y buggys (Orden HAC/1501/2025) |
+| 9 | `gestotrafic_buscar_valor_base` / `_fix` | Funciones de búsqueda del valor base; devuelven `encontrado=false` en vez de inventar |

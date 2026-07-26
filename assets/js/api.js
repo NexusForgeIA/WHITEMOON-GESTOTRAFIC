@@ -197,7 +197,14 @@
       body: JSON.stringify(payload)
     });
     var data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || 'No se pudo calcular el ITP');
+    if (!res.ok || data.error) {
+      // `sin_valor_boe` no es un fallo del motor: es que no hay precio medio
+      // para ese vehículo. Se traslada el mensaje legible, no el código.
+      var e = new Error(data.mensaje || data.error || 'No se pudo calcular el ITP');
+      e.codigo = data.error;
+      e.candidatos = data.candidatos || null;
+      throw e;
+    }
     return data;
   }
 
