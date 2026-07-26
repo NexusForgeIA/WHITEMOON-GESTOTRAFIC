@@ -21,6 +21,7 @@ de expediente) y en el pie del contrato generado.
 
 | # | Módulo | Estado |
 |---|--------|--------|
+| 0 | **Gest-IA**: alta de expedientes leyendo los documentos con IA | ✅ |
 | 0 | Multiusuario: alta de gestores y aislamiento por RLS | ✅ |
 | 1 | Login real contra `gestotrafic_usuarios` (bcrypt) | ✅ |
 | 2 | Dashboard con KPIs | ✅ |
@@ -197,7 +198,15 @@ Sin frameworks ni build: HTML, CSS y JavaScript puro sobre GitHub Pages.
 
 `#/dashboard` · `#/clientes` · `#/clientes/:id` · `#/expedientes` ·
 `#/expedientes/nuevo` · `#/expedientes/:id` · `#/kanban` ·
-`#/gestores` (solo admin)
+`#/gest-ia` · `#/gestores` (solo admin)
+
+### Gest-IA
+
+Alta de expedientes subiendo los documentos: Claude los lee con visión, extrae
+los campos con un nivel de confianza y monta el expediente pre-rellenado con el
+ITP calculado. Queda en **pendiente de validación** hasta que un gestor lo
+confirma; lo que la IA no leyó con claridad queda vacío y resaltado, nunca
+inventado. Detalle en [`GEST-IA.md`](GEST-IA.md).
 
 ---
 

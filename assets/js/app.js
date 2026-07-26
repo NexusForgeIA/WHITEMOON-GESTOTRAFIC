@@ -36,6 +36,8 @@
       : [c.nombre, c.apellidos].filter(Boolean).join(' ');
   };
 
+  const ICO_IA = '<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3.4"/>';
+
   const svg = (path, cls) =>
     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" ${cls ? `class="${cls}"` : ''}>${path}</svg>`;
 
@@ -716,7 +718,7 @@
         <thead><tr><th>Referencia</th><th>Trámite</th><th>Cliente</th>${verGestor ? '<th>Gestor</th>' : ''}<th>Vehículo</th><th>Matrícula</th><th>Estado</th><th>ITP</th></tr></thead>
         <tbody>${expedientes.map(e => `
           <tr class="clickable" data-exp="${h(e.id)}">
-            <td class="t-mono">${h(e.referencia)}</td>
+            <td class="t-mono">${h(e.referencia)}${ES_PROPUESTA_IA(e) ? ' <span class="badge badge-ia" title="Montado por Gest-IA · pendiente de validación">IA</span>' : ''}</td>
             <td><span class="badge badge-tramite">${h(T.tramite(e.tipo_tramite).corto)}</span></td>
             <td>${h(nombreCliente(e.cliente))}</td>
             ${verGestor ? `<td class="t-muted">${h(nombreGestor(e))}</td>` : ''}
@@ -931,12 +933,16 @@
         </div>
       </div>
 
+      ${bannerGestIA(exp)}
+
       <div class="tabs" id="tabs">
         ${pestanas.map((p, i) => `<button class="tab ${i === 0 ? 'active' : ''}" data-tab="${p.id}">${h(p.label)}</button>`).join('')}
       </div>
 
       <div id="tab-content"></div>
       ${footer()}`;
+
+    activarBannerGestIA(exp, tr);
 
     const cont = view.querySelector('#tab-content');
     const paneles = {
@@ -972,6 +978,108 @@
         location.hash = '#/expedientes';
       }
     }));
+  }
+
+  /* ---------- Gest-IA · aviso de validación pendiente ---------- */
+
+  const ES_PROPUESTA_IA = (exp) => exp.ia_estado === 'pendiente_validacion';
+
+  function bannerGestIA(exp) {
+    const ia = exp.ia_extraccion || {};
+    if (exp.ia_estado === 'validado') {
+      return `<div class="ia-banner validado">
+        ${svg('<path d="M20 6 9 17l-5-5"/>')}
+        <div><b>Validado por ${h((exp.ia_validador && exp.ia_validador.nombre) || 'un gestor')}</b>
+          el ${fecha(exp.ia_validado_at)}. Este expediente lo montó Gest-IA y ya está en el flujo normal.</div>
+      </div>`;
+    }
+    if (!ES_PROPUESTA_IA(exp)) return '';
+
+    const props = ia.propuestas || {};
+    const dudosos = Object.keys(props).filter(k => props[k].confianza !== 'alta');
+    const huecos = ia.huecos || [];
+
+    return `<div class="ia-banner">
+      <div class="ia-banner-cab">
+        <div class="ia-banner-ico">${svg(ICO_IA)}</div>
+        <div>
+          <b>Pendiente de validación · propuesta de Gest-IA</b>
+          <small>Cada dato de abajo es una <b>propuesta</b> leída de los documentos, no un dato confirmado.
+            Revisa lo resaltado, corrige lo que haga falta y valida.</small>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn" id="btn-validar-ia">Validar y crear</button>
+      </div>
+      <div class="ia-banner-kpis">
+        <span class="ia-chip alta">${Object.keys(props).length - dudosos.length} campos con confianza alta</span>
+        ${dudosos.length ? `<span class="ia-chip media">${dudosos.length} a revisar</span>` : ''}
+        ${huecos.length ? `<span class="ia-chip baja">${huecos.length} obligatorio${huecos.length === 1 ? '' : 's'} sin leer</span>` : ''}
+        ${exp.ia_modelo ? `<span class="t-muted" style="font-size:.72rem">leído con <span class="t-mono">${h(exp.ia_modelo)}</span></span>` : ''}
+      </div>
+      ${huecos.length ? `<div class="ia-huecos">
+        ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
+        <div>Gest-IA no pudo leer con seguridad: <b>${huecos.map(x => h(x.etiqueta)).join(', ')}</b>.
+          Están en blanco a propósito — no se inventa un dato fiscal.</div>
+      </div>` : ''}
+    </div>`;
+  }
+
+  function activarBannerGestIA(exp, tr) {
+    const btn = view.querySelector('#btn-validar-ia');
+    if (!btn) return;
+
+    btn.addEventListener('click', () => modal({
+      titulo: 'Validar el expediente',
+      cuerpo: `<p style="margin-top:0">Confirmas que has revisado los datos que propuso Gest-IA para
+          <b>${h(exp.referencia)}</b> y que son correctos.</p>
+        <p class="t-muted" style="font-size:.82rem">Queda registrado quién valida y cuándo. A partir de ahí
+          el expediente entra en el flujo normal y deja de marcarse como propuesta.</p>
+        <div class="field">
+          <label for="f-estado-val">Estado al validar</label>
+          <select name="estado_val" id="f-estado-val">
+            ${window.GT_ESTADOS.map(e => `<option value="${h(e.id)}" ${e.id === 'documentacion' ? 'selected' : ''}>${h(e.label)}</option>`).join('')}
+          </select>
+        </div>`,
+      okTexto: 'Validar y crear',
+      onOk: async (root) => {
+        const cambios = {
+          ia_estado: 'validado',
+          ia_validado_por: session.id,
+          ia_validado_at: new Date().toISOString(),
+          estado: val(root, 'estado_val') || exp.estado
+        };
+        await GTApi.actualizarExpediente(exp.id, cambios);
+        Object.assign(exp, cambios);
+        toast('Expediente validado por ' + session.nombre, 'ok');
+        vistaExpediente(exp.id);
+      }
+    }));
+  }
+
+  /** Marca en el formulario los campos que vienen de Gest-IA. */
+  function decorarPropuestasIA(form, exp) {
+    if (!ES_PROPUESTA_IA(exp)) return;
+    const ia = exp.ia_extraccion || {};
+    const props = ia.propuestas || {};
+    const huecos = {};
+    (ia.huecos || []).forEach(x => { huecos[x.campo] = true; });
+
+    form.querySelectorAll('.field[data-campo]').forEach(f => {
+      const campo = f.dataset.campo;
+      const p = props[campo];
+      const lbl = f.querySelector('label');
+      if (!lbl) return;
+
+      if (p && p.valor !== null) {
+        f.classList.add('ia-campo', 'ia-' + p.confianza);
+        lbl.insertAdjacentHTML('beforeend',
+          `<span class="ia-sello ${h(p.confianza)}" title="${h('Leído de: ' + p.origen + (p.nota ? ' · ' + p.nota : ''))}">IA ${h(p.confianza)}</span>`);
+      } else if (huecos[campo] || (p && p.valor === null)) {
+        f.classList.add('ia-campo', 'ia-hueco');
+        lbl.insertAdjacentHTML('beforeend',
+          `<span class="ia-sello hueco" title="${h((p && p.nota) || 'Gest-IA no pudo leer este dato')}">no leído</span>`);
+      }
+    });
   }
 
   /* ---------- Panel: Calculadora ITP (solo transferencia) ---------- */
@@ -1253,6 +1361,7 @@
 
     const form = cont.querySelector('#form-datos');
     activarVendedorEmpresa(form);
+    decorarPropuestasIA(form, exp);
 
     const selGestor = cont.querySelector('#f-gestor');
     if (selGestor) selGestor.addEventListener('change', async () => {
@@ -1448,6 +1557,264 @@
   }
 
   /* ============================================================
+     VISTA · GEST-IA · alta por documentos
+     ============================================================ */
+  async function vistaGestIA(tipoPre) {
+    if (!tipoPre) return vistaGestIAElegirTipo();
+
+    const tr = T.tramite(tipoPre);
+    loading('Preparando Gest-IA…');
+    const clientes = await cargarClientes();
+    const docs = T.docsDe(tr, {}).filter(d => d.tipo !== 'otros');
+
+    view.innerHTML = `
+      ${cabecera()}
+      <div class="page-head">
+        <div>
+          <a href="#/gest-ia" class="t-muted" style="font-size:.8rem">← Cambiar tipo de trámite</a>
+          <h1 style="margin-top:6px">${svg(ICO_IA, 'h1-ico')} Gest-IA · ${h(tr.nombre)}</h1>
+          <p>Sube los documentos y Gest-IA monta el expediente pre-rellenado.</p>
+        </div>
+      </div>
+
+      <div class="stack" style="max-width:900px">
+        <div class="card">
+          <div class="form-sec">Cliente (opcional)</div>
+          <div class="field">
+            <label for="f-cliente-ia">Cliente del expediente</label>
+            <select id="f-cliente-ia" name="cliente_id">
+              <option value="">— Lo asigno después —</option>
+              ${clientes.map(c => `<option value="${h(c.id)}">${h(nombreCliente(c))} · ${h(c.nif)}</option>`).join('')}
+            </select>
+          </div>
+
+          ${tr.calculo === 'itp' ? `
+            <div class="form-sec">Fiscalidad</div>
+            <div class="empresa-note">
+              ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
+              <div>El <b>valor BOE</b> no está en ningún documento: sale de la tabla de precios medios
+                del Anexo I. Lo aporta el gestor. Con él, Gest-IA calcula el ITP en cuanto termina de leer.</div>
+            </div>
+            <div class="form-grid">
+              <div class="field">
+                <label for="f-boe-ia">Valor BOE Anexo I (€)</label>
+                <input type="number" step="0.01" min="0" id="f-boe-ia" name="valor_boe" placeholder="21000">
+              </div>
+              <div class="field">
+                <label for="f-ccaa-ia">CCAA del comprador</label>
+                <select id="f-ccaa-ia" name="ccaa">
+                  ${window.GT_CCAA.map(c => `<option ${c === 'Comunidad de Madrid' ? 'selected' : ''}>${h(c)}</option>`).join('')}
+                </select>
+              </div>
+            </div>` : ''}
+
+          <div class="form-sec">Documentos del trámite</div>
+          <p class="t-muted" style="font-size:.79rem;margin:0 0 14px">
+            Sube los que tengas. Gest-IA lee foto o escaneo (JPG, PNG) y PDF, máximo 10 MB por archivo.
+            Los que falten los rellena el gestor a mano.
+          </p>
+
+          <div id="ia-docs">
+            ${docs.map(d => `
+              <div class="doc-row" data-doc="${h(d.tipo)}">
+                <div class="doc-ico">${svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>')}</div>
+                <div class="doc-info">
+                  <strong>${h(d.label)} ${d.obligatorio ? '' : '<span class="t-muted" style="font-weight:400;font-size:.74rem">· opcional</span>'}</strong>
+                  <small data-nombre>Sin archivo</small>
+                </div>
+                <div class="doc-actions">
+                  <label class="file-label">Elegir<input type="file" accept="image/*,application/pdf" data-tipo="${h(d.tipo)}"></label>
+                </div>
+              </div>`).join('')}
+          </div>
+        </div>
+
+        <div class="regul-note">
+          ${svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>')}
+          <div><b>Gest-IA propone, el gestor dispone.</b> El expediente nace en
+            <b>pendiente de validación</b>: nada avanza hasta que revises los datos y los confirmes.
+            Los campos que la IA no haya leído con claridad quedan vacíos y resaltados.</div>
+        </div>
+
+        <div class="flex">
+          <button class="btn" id="btn-ia" disabled>${svg(ICO_IA)} Analizar con Gest-IA</button>
+          <a href="#/expedientes" class="btn btn-ghost">Cancelar</a>
+          <div class="spacer"></div>
+          <span class="t-muted" style="font-size:.78rem" id="ia-cuenta">0 documentos</span>
+        </div>
+      </div>
+      ${footer()}`;
+
+    /* Los archivos se retienen en memoria: el expediente aún no existe y sin
+       expediente el bucket rechaza la subida (la política comprueba propiedad). */
+    const elegidos = {};
+    const btn = view.querySelector('#btn-ia');
+    const cuenta = view.querySelector('#ia-cuenta');
+
+    const refrescar = () => {
+      const n = Object.keys(elegidos).length;
+      cuenta.textContent = n + ' documento' + (n === 1 ? '' : 's');
+      btn.disabled = n === 0;
+    };
+
+    view.querySelectorAll('#ia-docs input[type="file"]').forEach(inp => {
+      inp.addEventListener('change', () => {
+        const f = inp.files && inp.files[0];
+        const fila = inp.closest('.doc-row');
+        if (!f) return;
+        if (f.size > 10 * 1024 * 1024) { toast('El archivo supera los 10 MB', 'err'); inp.value = ''; return; }
+        elegidos[inp.dataset.tipo] = f;
+        fila.classList.add('ok');
+        fila.querySelector('[data-nombre]').textContent = f.name + ' · ' + Math.round(f.size / 1024) + ' KB';
+        refrescar();
+      });
+    });
+
+    btn.addEventListener('click', () => lanzarGestIA(tr, elegidos, {
+      cliente_id: val(view, 'cliente_id'),
+      valor_boe: view.querySelector('#f-boe-ia') ? num(view, 'valor_boe') : null,
+      ccaa: view.querySelector('#f-ccaa-ia') ? val(view, 'ccaa') : null
+    }));
+  }
+
+  function vistaGestIAElegirTipo() {
+    view.innerHTML = `
+      ${cabecera()}
+      <div class="page-head">
+        <div>
+          <h1>${svg(ICO_IA, 'h1-ico')} Alta con Gest-IA</h1>
+          <p>Elige el trámite, sube sus documentos y la IA monta el expediente. Tú lo validas.</p>
+        </div>
+      </div>
+
+      <div class="tipo-grid">
+        ${window.GT_TRAMITES.map(tr => `
+          <button type="button" class="tipo-card" data-tipo="${h(tr.id)}">
+            <div class="tipo-card-ico">${svg(tr.icono)}</div>
+            <div class="tipo-card-txt">
+              <strong>${h(tr.nombre)}</strong>
+              <small>${h(tr.descripcion)}</small>
+              <div class="tipo-card-tags">
+                <span class="tag">${T.docsDe(tr, {}).filter(d => d.obligatorio).length} docs</span>
+                ${tr.calculo === 'itp' ? '<span class="tag calc">Calcula ITP</span>' : ''}
+              </div>
+            </div>
+          </button>`).join('')}
+      </div>
+
+      <div style="margin-top:20px">${avisoRegulado()}</div>
+      ${footer()}`;
+
+    view.querySelectorAll('[data-tipo]').forEach(b =>
+      b.addEventListener('click', () => (location.hash = '#/gest-ia?tipo=' + b.dataset.tipo)));
+  }
+
+  /** Crear expediente → subir → leer con IA → volcar propuestas → calcular ITP. */
+  async function lanzarGestIA(tr, archivos, extra) {
+    const tipos = Object.keys(archivos);
+    const pasos = [
+      'Creando el expediente…',
+      'Subiendo ' + tipos.length + ' documento' + (tipos.length === 1 ? '' : 's') + '…',
+      'Gest-IA está leyendo los documentos…',
+      'Montando el expediente…'
+    ];
+
+    view.innerHTML = `${cabecera()}
+      <div class="ia-progreso">
+        <div class="ia-progreso-ico">${svg(ICO_IA)}</div>
+        <h2>Gest-IA está trabajando</h2>
+        <p id="ia-paso">${h(pasos[0])}</p>
+        <div class="checklist-bar"><div class="checklist-fill" id="ia-barra" style="width:8%"></div></div>
+        <small class="t-muted">Leer varios documentos puede tardar cerca de un minuto.</small>
+      </div>`;
+
+    const paso = (i) => {
+      view.querySelector('#ia-paso').textContent = pasos[i];
+      view.querySelector('#ia-barra').style.width = ((i + 1) / pasos.length * 100) + '%';
+    };
+
+    let exp = null;
+    try {
+      // 1 · El expediente primero: sin él, la política del bucket rechaza la subida.
+      // El valor BOE y la CCAA no salen de ningún documento: los aporta el
+      // gestor en el paso anterior, así que entran ya con el expediente.
+      exp = await GTApi.crearExpediente({
+        tipo_tramite: tr.id,
+        estado: 'documentacion',
+        cliente_id: extra.cliente_id || null,
+        valor_boe: extra.valor_boe || null,
+        ccaa: extra.ccaa || null,
+        ia_estado: 'pendiente_validacion',
+        datos: {}
+      });
+
+      paso(1);
+      const subidos = [];
+      for (const tipo of tipos) {
+        const archivo = await GTApi.subirArchivo(exp.id, tipo, archivos[tipo]);
+        await GTApi.registrarDocumento(exp.id, tipo, archivo);
+        subidos.push({ tipo: tipo, storage_path: archivo.path });
+      }
+
+      paso(2);
+      const lectura = await GTApi.analizarDocumentos(exp.id, subidos);
+
+      paso(3);
+      const props = GTGestIA.propuestas(tr, lectura.documentos);
+      const cambios = GTGestIA.aExpediente(tr, props, {});
+      // Lo que ya aportó el gestor no cuenta como hueco de la IA.
+      const yaPuestos = { valor_boe: extra.valor_boe, ccaa: extra.ccaa };
+      cambios.ia_extraccion = {
+        propuestas: props,
+        documentos: lectura.documentos,
+        huecos: GTGestIA.huecos(tr, props).filter(x => !yaPuestos[x.campo]),
+        analizado_at: new Date().toISOString()
+      };
+      cambios.ia_modelo = lectura.modelo;
+      await GTApi.actualizarExpediente(exp.id, cambios);
+
+      // 4 · ITP, si el trámite lo lleva y hay con qué calcularlo.
+      if (tr.calculo === 'itp' && extra.valor_boe && cambios.fecha_matriculacion) {
+        try {
+          const r = await GTApi.calcularITP({
+            valor_boe: extra.valor_boe,
+            precio_contrato: cambios.precio_contrato || null,
+            fecha_matriculacion: cambios.fecha_matriculacion,
+            fecha_transmision: new Date().toISOString().slice(0, 10),
+            ccaa: extra.ccaa || 'Comunidad de Madrid',
+            cilindrada: cambios.cilindrada || null,
+            cvf: cambios.cvf || null,
+            etiqueta_dgt: cambios.etiqueta_dgt || '',
+            uso_especial: false,
+            tipo_vehiculo: 'coche'
+          });
+          await GTApi.actualizarExpediente(exp.id, {
+            valor_venal: r.valor_venal, base_imponible: r.base_imponible,
+            itp_importe: r.itp, tasa_dgt: r.tasa_dgt, total_impuestos: r.total_impuestos,
+            calculo_json: r, calculado_at: new Date().toISOString()
+          });
+        } catch (e) {
+          console.warn('Gest-IA: no se pudo calcular el ITP', e);
+        }
+      }
+
+      toast('Gest-IA montó ' + exp.referencia + ' · pendiente de validación', 'ok');
+      location.hash = '#/expedientes/' + exp.id;
+
+    } catch (err) {
+      view.innerHTML = `${cabecera()}
+        <div class="empty">
+          <p style="color:var(--danger)">Gest-IA no pudo completar el alta.</p>
+          <p class="t-muted" style="font-size:.82rem">${h(err.message || err)}</p>
+          ${exp ? `<p class="t-muted" style="font-size:.82rem">El expediente <b>${h(exp.referencia)}</b> se creó
+            con los documentos que sí subieron: puedes completarlo a mano.</p>
+            <a class="btn" href="#/expedientes/${h(exp.id)}">Abrir el expediente</a>`
+          : '<a class="btn btn-ghost" href="#/gest-ia">Volver a intentarlo</a>'}
+        </div>`;
+    }
+  }
+
+  /* ============================================================
      VISTA · GESTORES (solo admin)
      ============================================================ */
   async function vistaGestores() {
@@ -1624,8 +1991,8 @@
 
   function tarjetaKanban(e, tactil) {
     const tr = T.tramite(e.tipo_tramite);
-    return `<div class="kan-card" draggable="true" data-id="${h(e.id)}">
-      <div class="kan-card-ref">${h(e.referencia)}</div>
+    return `<div class="kan-card ${ES_PROPUESTA_IA(e) ? 'ia-pendiente' : ''}" draggable="true" data-id="${h(e.id)}">
+      <div class="kan-card-ref">${h(e.referencia)}${ES_PROPUESTA_IA(e) ? ' <span class="badge badge-ia">IA</span>' : ''}</div>
       <div class="kan-card-title">${h([e.marca, e.modelo].filter(Boolean).join(' ') || tr.nombre)}</div>
       <div class="kan-card-meta">${h(e.matricula || '—')} · ${h(nombreCliente(e.cliente))}</div>
       <div class="kan-card-foot">
@@ -1758,6 +2125,8 @@
         }
       } else if (seccion === 'kanban') {
         await vistaKanban();
+      } else if (seccion === 'gest-ia') {
+        await vistaGestIA(params.get('tipo'));
       } else if (seccion === 'gestores') {
         await vistaGestores();
       } else {

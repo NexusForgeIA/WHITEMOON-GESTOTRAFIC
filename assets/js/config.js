@@ -23,6 +23,9 @@ window.GT_CONFIG = {
   // Login y alta de gestores (verifica bcrypt y emite la sesión)
   FN_AUTH: 'gestotrafic-auth',
 
+  // Gest-IA · lectura de documentos con Claude (visión)
+  FN_GESTIA: 'gestia-extraer',
+
   // Datos de la gestoría que aparecen en el contrato generado
   GESTORIA: {
     nombre: 'GestoTrafic · Gestoría de Tráfico',
