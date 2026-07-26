@@ -52,11 +52,16 @@ window.GT_CCAA = [
 
 /* Tipos de vehículo a efectos del Anexo I.
    Los que NO son turismo se tarifan por TRAMO de cilindrada (o de kW en
-   eléctricas), así que su valor base se busca solo en
-   gestotrafic_precios_medios. El turismo va por marca/modelo/versión y
-   hoy sigue pidiendo el valor a mano: falta el fichero del Anexo I. */
+   eléctricas): el motor resuelve el valor base solo y el campo manual sobra,
+   por eso van con `auto: true`.
+
+   El turismo se tarifa por marca/modelo/versión sobre las 61.634 filas del
+   Anexo I. NO lleva `auto: true` a propósito: el valor base solo se rellena
+   cuando el gestor elige una versión concreta en el desplegable, y mientras
+   tanto el campo sigue editable a mano. Dos versiones del mismo modelo pueden
+   diferir en más de mil euros, así que esa elección no se automatiza. */
 window.GT_TIPOS_VEHICULO = [
-  { id: 'coche',          label: 'Turismo',          auto: false, por: null },
+  { id: 'coche',          label: 'Turismo',          auto: false, por: 'marca_modelo' },
   { id: 'moto',           label: 'Motocicleta',      auto: true,  por: 'cilindrada' },
   { id: 'moto_electrica', label: 'Moto eléctrica',   auto: true,  por: 'kw' },
   { id: 'quad',           label: 'Quad',             auto: true,  por: 'cilindrada' },

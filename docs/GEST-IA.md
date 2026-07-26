@@ -76,6 +76,26 @@ Los dos se piden al gestor en la pantalla de subida, señalados como tales. El
 precio de contrato y la fecha de matriculación sí salen de los documentos, así
 que el cálculo se completa sin más intervención.
 
+#### Por qué Gest-IA no elige la versión del turismo
+
+En motos, quads y buggys el Anexo I tarifa por tramo de cilindrada o de kW, así
+que el valor base sale solo del dato de la ficha técnica.
+
+En turismos no: el Anexo I lista **61.634 versiones** y la ficha técnica no trae
+la denominación comercial exacta del BOE. Gest-IA lee «Modelo» (campo D.3) y con
+eso se preselecciona **marca y modelo** —que solo sirven para navegar— y se
+**propone** la versión más parecida, marcada con `★ propuesta IA`. La versión
+queda **sin elegir**: la confirma el gestor.
+
+No es una precaución de más. En el Anexo I hay **5.107 denominaciones que se
+repiten dentro de su marca con precios distintos**: `CLIO 1.5 DCI Authentique
+3p`, por ejemplo, existe con 48, 63 y 66 kW y vale 10.500, 11.400 u 11.600 €.
+Lo que las distingue son los kW de la ficha técnica, no el nombre. Elegir a
+ciegas entre esos tres precios sería inventar el valor base.
+
+Si ninguna versión se parece lo suficiente, o si las dos mejores empatan, no se
+propone ninguna: se avisa en ámbar y se pide selección manual.
+
 ### 4 · La validación es obligatoria
 
 Mientras `ia_estado = 'pendiente_validacion'`:
