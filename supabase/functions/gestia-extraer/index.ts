@@ -34,6 +34,11 @@ const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')!;
 const MODELO = 'claude-opus-5';
 const BUCKET = 'gestotrafic-docs';
 
+/* Archivos que se leen como un mismo documento. Un DNI son dos caras y una
+   ficha técnica dos páginas; el tope está para que un expediente con muchos
+   archivos del mismo tipo no monte una petición desproporcionada. */
+const MAX_ARCHIVOS = 4;
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -49,15 +54,28 @@ const json = (body: unknown, status = 200) =>
 /* ---------------- Qué se extrae de cada tipo de documento ---------------- */
 
 type Campo = { etiqueta: string; pista: string };
+type Cara = { id: string; label: string; contiene: string };
 
-const PERFILES: Record<string, { titulo: string; campos: Record<string, Campo> }> = {
+const PERFILES: Record<string, {
+  titulo: string;
+  campos: Record<string, Campo>;
+  caras?: Cara[];
+}> = {
   dni: {
     titulo: 'DNI, NIE o pasaporte español',
+    /* El DNI reparte sus datos entre las dos caras y puede llegar en dos
+       archivos o en uno con las dos. Declararlas sirve para dos cosas: pedir
+       al modelo que diga cuáles ha visto, y poder avisar de la que falta en
+       lugar de dejar el domicilio en blanco sin explicación. */
+    caras: [
+      { id: 'anverso', label: 'anverso', contiene: 'fotografía, nombre, apellidos y número de documento' },
+      { id: 'reverso', label: 'reverso', contiene: 'domicilio, lugar de nacimiento y filiación' }
+    ],
     campos: {
-      nombre:    { etiqueta: 'Nombre de pila',   pista: 'Solo el nombre, sin apellidos.' },
-      apellidos: { etiqueta: 'Apellidos',        pista: 'Los dos apellidos, en su orden.' },
-      numero:    { etiqueta: 'Número de DNI/NIE', pista: '8 dígitos + letra (DNI) o X/Y/Z + 7 dígitos + letra (NIE). Copia la letra tal cual aparece.' },
-      direccion: { etiqueta: 'Domicilio',        pista: 'Suele estar en el reverso. Si solo ves el anverso, devuelve null.' }
+      nombre:    { etiqueta: 'Nombre de pila',   pista: 'Solo el nombre, sin apellidos. Está en el anverso.' },
+      apellidos: { etiqueta: 'Apellidos',        pista: 'Los dos apellidos, en su orden. Están en el anverso.' },
+      numero:    { etiqueta: 'Número de DNI/NIE', pista: '8 dígitos + letra (DNI) o X/Y/Z + 7 dígitos + letra (NIE). Copia la letra tal cual aparece. Está en el anverso.' },
+      direccion: { etiqueta: 'Domicilio',        pista: 'Está en el REVERSO. Si no tienes el reverso a la vista, devuelve null: no lo deduzcas de ningún otro documento.' }
     }
   },
   cif: {
@@ -109,6 +127,13 @@ function perfilDe(tipo: string): string | null {
   return null;   // certificados, denuncias, "otros"… no se extraen
 }
 
+/** Caras declaradas del perfil que el modelo dice NO haber visto. */
+function carasQueFaltan(perfil: string, vistas: Record<string, boolean> | null | undefined): string[] {
+  const caras = PERFILES[perfil]?.caras;
+  if (!caras || !vistas) return [];
+  return caras.filter(c => vistas[c.id] !== true).map(c => c.id);
+}
+
 /* ---------------- Esquema de salida ---------------- */
 
 const nulable = (t: string) => ({ anyOf: [{ type: t }, { type: 'null' }] });
@@ -123,7 +148,8 @@ const nulable = (t: string) => ({ anyOf: [{ type: t }, { type: 'null' }] });
    son texto de apoyo y la diferencia entre "" y null no aporta. Así son 8
    uniones y quedan campos de sobra para crecer. */
 function esquema(perfil: string) {
-  const campos = PERFILES[perfil].campos;
+  const p = PERFILES[perfil];
+  const campos = p.campos;
   const props: Record<string, unknown> = {};
   for (const nombre of Object.keys(campos)) {
     props[nombre] = {
@@ -137,33 +163,66 @@ function esquema(perfil: string) {
       additionalProperties: false
     };
   }
+
+  const salida: Record<string, unknown> = {
+    campos: {
+      type: 'object',
+      properties: props,
+      required: Object.keys(campos),
+      additionalProperties: false
+    },
+    legible: { type: 'boolean' },
+    observacion: { type: 'string' }
+  };
+  const requeridos = ['campos', 'legible', 'observacion'];
+
+  /* Qué caras ha visto. Son booleanos, no uniones: no gastan del presupuesto
+     de 16 `anyOf` por esquema. Preguntarlo explícitamente es más fiable que
+     deducir la cara que falta de que un campo venga vacío — un domicilio
+     ilegible y un reverso que no se ha subido no son lo mismo. */
+  if (p.caras) {
+    const caras: Record<string, unknown> = {};
+    for (const c of p.caras) caras[c.id] = { type: 'boolean' };
+    salida.caras_vistas = {
+      type: 'object',
+      properties: caras,
+      required: p.caras.map(c => c.id),
+      additionalProperties: false
+    };
+    requeridos.push('caras_vistas');
+  }
+
   return {
     type: 'object',
-    properties: {
-      campos: {
-        type: 'object',
-        properties: props,
-        required: Object.keys(campos),
-        additionalProperties: false
-      },
-      legible: { type: 'boolean' },
-      observacion: { type: 'string' }
-    },
-    required: ['campos', 'legible', 'observacion'],
+    properties: salida,
+    required: requeridos,
     additionalProperties: false
   };
 }
 
-function prompt(perfil: string) {
+function prompt(perfil: string, archivos: number) {
   const p = PERFILES[perfil];
   const lista = Object.entries(p.campos)
     .map(([k, c]) => `- ${k} (${c.etiqueta}): ${c.pista}`)
     .join('\n');
 
-  return `Eres el motor de lectura documental de una gestoría de tráfico española. Vas a leer ${p.titulo} y extraer los datos que se te piden.
+  /* Con varios archivos hay que decirlo: son el MISMO documento por las dos
+     caras, no dos documentos distintos. */
+  const varios = archivos > 1
+    ? `\nTe llegan ${archivos} archivos. Son ${p.caras ? 'las caras' : 'las páginas'} de UN SOLO documento, el mismo: léelos juntos y devuelve una sola respuesta combinando lo que veas en todos.\n`
+    : '';
 
+  const caras = p.caras
+    ? `\nCARAS DEL DOCUMENTO\nEste documento tiene ${p.caras.length} caras y los datos están repartidos:\n`
+      + p.caras.map(c => `- ${c.label}: ${c.contiene}`).join('\n')
+      + `\n\nEn "caras_vistas" marca true SOLO las caras que estés viendo de verdad en los archivos. Si falta una, sus datos NO existen para ti: devuélvelos null con confianza "baja" y explica en su "nota" que falta esa cara. No los deduzcas ni los completes con lo que veas en la otra.\n`
+    : '';
+
+  return `Eres el motor de lectura documental de una gestoría de tráfico española. Vas a leer ${p.titulo} y extraer los datos que se te piden.
+${varios}
 Campos a extraer:
 ${lista}
+${caras}
 
 REGLA CRÍTICA — léela dos veces:
 Los datos que extraes se usan para liquidar impuestos y para inscribir cambios de titularidad ante la DGT. Un dato inventado que parezca correcto causa un daño mayor que un hueco vacío, porque nadie lo revisará.
@@ -245,19 +304,58 @@ Deno.serve(async (req) => {
 
     const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
+    /* Un documento del checklist puede llegar en VARIOS archivos: el DNI tiene
+       dos caras y el domicilio solo está en el reverso. Se agrupan por `tipo`
+       y se leen en UNA sola llamada, para que el domicilio del reverso caiga
+       en el mismo registro que el número del anverso.
+
+       Agrupa por tipo y SOLO por tipo. Cada documento sigue siendo una lectura
+       aislada con su propia llamada: el DNI del comprador nunca ve el del
+       vendedor, así que no hay forma de que un dato de uno acabe en el otro. */
+    const grupos = new Map<string, string[]>();
+    for (const d of documentos as { tipo: string; storage_path: string }[]) {
+      if (!d || !d.tipo || !d.storage_path) continue;
+      const paths = grupos.get(d.tipo) || [];
+      if (paths.indexOf(d.storage_path) === -1) paths.push(d.storage_path);
+      grupos.set(d.tipo, paths);
+    }
+
     // 3 · Un documento, una lectura. En paralelo: son independientes.
-    const lecturas = await Promise.all(documentos.map(async (doc: { tipo: string; storage_path: string }) => {
-      const base = { tipo: doc.tipo, storage_path: doc.storage_path };
-      const perfilDoc = perfilDe(doc.tipo);
+    const lecturas = await Promise.all([...grupos.entries()].map(async ([tipo, todos]) => {
+      // Con más archivos la petición se va de tamaño sin aportar nada: un DNI
+      // son dos caras. Si llegan más, se leen los primeros y se dice cuántos.
+      const paths = todos.slice(0, MAX_ARCHIVOS);
+      const ignorados = todos.length - paths.length;
+
+      const base = {
+        tipo,
+        storage_path: paths[0],
+        storage_paths: paths,
+        archivos: paths.length
+      };
+      const perfilDoc = perfilDe(tipo);
       if (!perfilDoc) return { ...base, extraido: false, motivo: 'Este tipo de documento no se lee automáticamente.' };
 
-      const bajada = await sb.storage.from(BUCKET).download(doc.storage_path);
-      if (bajada.error || !bajada.data) {
+      const bajadas = await Promise.all(paths.map(async (p) => {
+        const r = await sb.storage.from(BUCKET).download(p);
+        if (r.error || !r.data) return null;
+        return { mime: r.data.type || 'application/octet-stream', datos: base64(await r.data.arrayBuffer()) };
+      }));
+      const archivos = bajadas.filter(Boolean) as { mime: string; datos: string }[];
+      if (!archivos.length) {
         return { ...base, extraido: false, motivo: 'No se pudo leer el archivo del expediente.' };
       }
 
-      const mime = bajada.data.type || 'application/octet-stream';
-      const datos = base64(await bajada.data.arrayBuffer());
+      /* Cada archivo va precedido de su número para que el modelo sepa que son
+         partes del mismo documento y no documentos sueltos. */
+      const contenido: unknown[] = [];
+      archivos.forEach((a, i) => {
+        if (archivos.length > 1) {
+          contenido.push({ type: 'text', text: `Archivo ${i + 1} de ${archivos.length} del mismo documento:` });
+        }
+        contenido.push(bloqueDocumento(a.mime, a.datos));
+      });
+      contenido.push({ type: 'text', text: prompt(perfilDoc, archivos.length) });
 
       try {
         const res = await anthropic.beta.messages.create({
@@ -274,13 +372,7 @@ Deno.serve(async (req) => {
           // con esto la petición se reintenta sola en vez de morir.
           betas: ['server-side-fallback-2026-07-01'],
           fallbacks: 'default',
-          messages: [{
-            role: 'user',
-            content: [
-              bloqueDocumento(mime, datos),
-              { type: 'text', text: prompt(perfilDoc) }
-            ]
-          }]
+          messages: [{ role: 'user', content: contenido }]
         } as Parameters<typeof anthropic.beta.messages.create>[0]);
 
         // Hay que mirar stop_reason ANTES de tocar content: en un rechazo
@@ -293,13 +385,19 @@ Deno.serve(async (req) => {
         if (!texto) return { ...base, extraido: false, motivo: 'El modelo no devolvió datos.' };
 
         const salida = JSON.parse((texto as { text: string }).text);
+        const nota = ignorados > 0
+          ? `Se han leído ${paths.length} archivos; ${ignorados} más no se han analizado.`
+          : '';
+
         return {
           ...base,
           extraido: true,
           perfil: perfilDoc,
           legible: salida.legible,
-          observacion: salida.observacion,
+          observacion: [salida.observacion, nota].filter(Boolean).join(' '),
           campos: salida.campos,
+          caras_vistas: salida.caras_vistas || null,
+          caras_faltan: carasQueFaltan(perfilDoc, salida.caras_vistas),
           modelo: res.model
         };
       } catch (e) {

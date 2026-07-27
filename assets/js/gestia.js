@@ -189,9 +189,29 @@
       .map(c => ({ campo: c.n, etiqueta: c.l }));
   }
 
+  /**
+   * Caras que faltan, en cristiano: «DNI / NIE del comprador · falta el
+   * reverso». No es lo mismo que un campo ilegible — el domicilio está en
+   * blanco porque nadie subió esa cara, y eso se arregla subiéndola.
+   */
+  function avisosCaras(tr, lecturas) {
+    const etiqueta = {};
+    T.docsDe(tr, {}).forEach(d => { etiqueta[d.tipo] = d.label; });
+
+    return (lecturas || [])
+      .filter(d => d.extraido && d.caras_faltan && d.caras_faltan.length)
+      .map(d => ({
+        tipo: d.tipo,
+        documento: etiqueta[d.tipo] || d.tipo,
+        caras: d.caras_faltan,
+        texto: (etiqueta[d.tipo] || d.tipo) + ' · falta el ' + d.caras_faltan.join(' y el ')
+      }));
+  }
+
   global.GTGestIA = {
     propuestas: propuestas,
     aExpediente: aExpediente,
-    huecos: huecos
+    huecos: huecos,
+    avisosCaras: avisosCaras
   };
 })(window);

@@ -578,6 +578,24 @@ tbody tr.clickable:hover { background: rgba(124, 77, 255, .07); }
 .file-label:hover { background: rgba(124, 77, 255, .1); }
 .file-label input { display: none; }
 
+/* Documento de varias caras (anverso + reverso de un DNI): la fila crece
+   hacia abajo con una línea por archivo, en vez de admitir uno solo. */
+.doc-row-caras { align-items: flex-start; }
+.doc-row-caras .doc-ico { margin-top: 2px; }
+.doc-cara {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  margin-top: 7px; padding: 6px 9px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, .028);
+}
+.doc-cara-l {
+  font-size: .71rem; font-weight: 700; letter-spacing: .02em;
+  text-transform: uppercase; color: var(--g); flex-shrink: 0;
+}
+.doc-cara-n { flex: 1; min-width: 0; font-size: .72rem; color: var(--muted); word-break: break-all; }
+.doc-subidas { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+.doc-subidas .file-label { padding: 6px 11px; font-size: .74rem; }
+
 .checklist-bar { height: 7px; background: rgba(255, 255, 255, .06); border-radius: 99px; overflow: hidden; margin: 10px 0 18px; }
 .checklist-fill { height: 100%; background: linear-gradient(90deg, var(--p), var(--g)); border-radius: 99px; transition: width .45s; }
 

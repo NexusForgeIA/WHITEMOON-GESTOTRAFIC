@@ -32,8 +32,11 @@
              comprador_tipo…) vale 'empresa': "DNI / NIF" pasa a "CIF"
 
    Cada DOCUMENTO declara:
-     tipo, label, obligatorio y opcionalmente `si`: función que
-     recibe el expediente y decide si el documento aplica.
+     tipo, label, obligatorio y opcionalmente:
+     si    · función que recibe el expediente y decide si aplica
+     caras · partes en que puede llegar (anverso y reverso de un DNI,
+             páginas de una ficha). Son varios archivos del MISMO tipo,
+             y Gest-IA los lee juntos como un solo documento.
    ============================================================ */
 (function (global) {
   'use strict';
@@ -119,13 +122,35 @@
     { n: 'comprador_telefono',  l: 'Teléfono',           t: 'text', col: 1, ph: '600 333 444' }
   ];
 
+  /* --- Documentos que llegan en varias caras ---
+     Un DNI reparte sus datos entre las dos caras: el número y el nombre están
+     en el anverso y el DOMICILIO en el reverso. Con una sola cara, Gest-IA se
+     queda sin la otra mitad, así que el hueco admite las dos.
+
+     `caras` son las partes que se esperan. Siempre vale además subir un único
+     archivo con todo (un PDF de las dos caras): esa es la cara `completo`, que
+     no se enumera aquí porque no es una parte, es el documento entero. */
+  const CARAS = {
+    dosCaras: [
+      { id: 'anverso', label: 'Anverso (cara A)', pista: 'Foto, nombre y número' },
+      { id: 'reverso', label: 'Reverso (cara B)', pista: 'Domicilio y filiación' }
+    ],
+    dosPaginas: [
+      { id: 'pagina_1', label: 'Página 1', pista: 'Identificación del vehículo' },
+      { id: 'pagina_2', label: 'Página 2', pista: 'Características y reformas' }
+    ]
+  };
+
+  /** La cara que representa el documento entero en un solo archivo. */
+  const CARA_COMPLETO = { id: 'completo', label: 'Documento completo', pista: 'Las dos caras en un archivo' };
+
   /* --- Documentos reutilizables --- */
   const D = {
-    dniTitular:   { tipo: 'dni_titular',         label: 'DNI / NIE / CIF del titular', obligatorio: true },
-    dniVendedor:  { tipo: 'dni_vendedor',        label: 'DNI / NIE del vendedor',      obligatorio: true },
-    dniComprador: { tipo: 'dni_comprador',       label: 'DNI / NIE del comprador',     obligatorio: true },
-    permiso:      { tipo: 'permiso_circulacion', label: 'Permiso de circulación',      obligatorio: true },
-    fichaTecnica: { tipo: 'ficha_tecnica',       label: 'Ficha técnica (ITV)',         obligatorio: true },
+    dniTitular:   { tipo: 'dni_titular',         label: 'DNI / NIE / CIF del titular', obligatorio: true, caras: CARAS.dosCaras },
+    dniVendedor:  { tipo: 'dni_vendedor',        label: 'DNI / NIE del vendedor',      obligatorio: true, caras: CARAS.dosCaras },
+    dniComprador: { tipo: 'dni_comprador',       label: 'DNI / NIE del comprador',     obligatorio: true, caras: CARAS.dosCaras },
+    permiso:      { tipo: 'permiso_circulacion', label: 'Permiso de circulación',      obligatorio: true, caras: CARAS.dosCaras },
+    fichaTecnica: { tipo: 'ficha_tecnica',       label: 'Ficha técnica (ITV)',         obligatorio: true, caras: CARAS.dosPaginas },
     otros:        { tipo: 'otros',               label: 'Otros documentos',            obligatorio: false }
   };
 
@@ -189,6 +214,7 @@
            fiscal correcta de esa parte. */
         {
           tipo: 'dni_comprador', label: 'DNI / NIE del comprador', obligatorio: true,
+          caras: CARAS.dosCaras,
           si: (exp) => !esCompradorEmpresa(exp)
         },
         {
@@ -197,6 +223,7 @@
         },
         {
           tipo: 'dni_vendedor', label: 'DNI / NIE del vendedor', obligatorio: true,
+          caras: CARAS.dosCaras,
           si: (exp) => !esVendedorEmpresa(exp)
         },
         {
@@ -454,6 +481,42 @@
     return t.docs.filter(d => typeof d.si !== 'function' || d.si(exp));
   }
 
+  /* ---------------- Documentos de varias caras ---------------- */
+
+  /** Caras que se esperan de un documento, con la de «documento completo» al
+      final. Un documento normal devuelve solo esa: un archivo y ya está. */
+  function carasDe(doc) {
+    return (doc && doc.caras ? doc.caras : []).concat([CARA_COMPLETO]);
+  }
+
+  /** ¿Este documento puede llegar en varios archivos? */
+  function admiteVariasCaras(doc) {
+    return !!(doc && doc.caras && doc.caras.length);
+  }
+
+  /** Etiqueta de una cara ('reverso' → 'Reverso (cara B)'). */
+  function etiquetaCara(doc, cara) {
+    const c = carasDe(doc).find(x => x.id === cara);
+    return c ? c.label : cara;
+  }
+
+  /**
+   * Qué caras del documento hay y cuáles faltan, dada la lista de archivos
+   * subidos (cada uno con su `cara`). Un archivo `completo` cubre el
+   * documento entero: quien manda las dos caras en un PDF no debe nada.
+   */
+  function estadoCaras(doc, archivos) {
+    const subidas = (archivos || []).map(a => a.cara || 'completo');
+    const completo = subidas.indexOf('completo') !== -1;
+    const esperadas = (doc && doc.caras) || [];
+    return {
+      completo: completo || (esperadas.length > 0 && esperadas.every(c => subidas.indexOf(c.id) !== -1)),
+      presentes: esperadas.filter(c => completo || subidas.indexOf(c.id) !== -1).map(c => c.id),
+      faltan: completo ? [] : esperadas.filter(c => subidas.indexOf(c.id) === -1).map(c => c.id),
+      conArchivoCompleto: completo
+    };
+  }
+
   /** Etiqueta legible del valor de un select. */
   function etiquetaOpcion(campo, valor) {
     if (!campo || !campo.op) return valor;
@@ -472,6 +535,10 @@
     campos: campos,
     camposTipoParte: camposTipoParte,
     docsDe: docsDe,
+    carasDe: carasDe,
+    admiteVariasCaras: admiteVariasCaras,
+    etiquetaCara: etiquetaCara,
+    estadoCaras: estadoCaras,
     etiquetaOpcion: etiquetaOpcion,
     esVendedorEmpresa: esVendedorEmpresa,
     esCompradorEmpresa: esCompradorEmpresa,

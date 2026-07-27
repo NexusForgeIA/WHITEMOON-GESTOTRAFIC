@@ -181,6 +181,13 @@ sube (foto o escaneo, JPG/PNG/PDF, máx. 10 MB) al bucket aislado
 `gestotrafic-docs` de Supabase Storage. Subir un documento del mismo tipo
 sustituye al anterior y borra el fichero antiguo del bucket.
 
+**DNI, permiso y ficha técnica admiten varias caras.** Un DNI tiene dos y el
+domicilio solo está en el reverso, así que el hueco acepta *Anverso* y *Reverso*
+por separado —sin que el segundo pise al primero— o un único archivo con las dos.
+La fila muestra qué hay (*anverso ✓ · reverso pendiente*) y queda en
+**Incompleto** hasta tenerlo todo. Gest-IA lee las caras **juntas**, como un solo
+documento; si falta una, avisa de cuál y deja sus campos en blanco.
+
 ### 7 · Contrato de compraventa
 
 Genera un documento HTML imprimible pre-rellenado con los datos del expediente:

@@ -57,6 +57,40 @@ subieron y el gestor lo completa a mano. Se avisa en pantalla con su referencia.
 | Permiso de circulación | titular, matrícula |
 | Contrato / factura | precio, fecha, vendedor, comprador |
 
+#### Un documento, varios archivos
+
+Un DNI tiene **dos caras** y los datos están repartidos: el número y el nombre
+en el anverso, el **domicilio en el reverso**. Con una sola cara se pierde la
+otra mitad, así que el hueco admite las dos —o un único archivo con todo, para
+quien lo tenga escaneado junto.
+
+Son varias filas de `gestotrafic_documentos` con el **mismo `tipo`**. No hizo
+falta columna nueva: la cara viaja en el nombre del objeto del bucket
+(`<expediente>/dni_comprador.reverso-<ts>.jpg`), que es un dato del archivo. Un
+objeto sin marca de cara —los de antes de esto— se lee como el documento
+entero, que es lo que era.
+
+`gestia-extraer` **agrupa por `tipo` y lee el grupo en una sola llamada**, para
+que el domicilio del reverso caiga en el mismo registro que el número del
+anverso. Agrupa por tipo y solo por tipo: cada documento del checklist sigue
+siendo su propia llamada, así que **el DNI del comprador nunca ve el del
+vendedor** y no hay manera de que un dato de uno acabe en el otro.
+
+El permiso de circulación y la ficha técnica admiten lo mismo (dos caras, dos
+páginas). Solo el DNI declara sus caras en el perfil de extracción, porque es
+el único donde un campo concreto vive en una cara concreta.
+
+#### La cara que falta se dice, no se rellena
+
+El modelo devuelve en `caras_vistas` qué caras está viendo **de verdad**. De ahí
+sale `caras_faltan`, y de ahí el aviso del banner: *«DNI / NIE del comprador ·
+falta el reverso»*.
+
+Se pregunta explícitamente en vez de deducirlo de que el domicilio venga vacío
+porque **no son lo mismo**: un domicilio borroso se arregla con una foto mejor y
+una cara que no se ha subido se arregla subiéndola. El campo, mientras tanto,
+queda en `null` con confianza baja y su nota — la regla de siempre.
+
 Cada campo vuelve con `valor`, `confianza` (alta/media/baja) y `nota`. Los tipos
 que no se leen automáticamente (certificados del CAT, denuncias, «otros») se
 suben igual y quedan en el checklist.

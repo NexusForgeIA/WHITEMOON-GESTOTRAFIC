@@ -121,10 +121,41 @@
       .eq('expediente_id', expedienteId).order('created_at', { ascending: true }));
   }
 
-  /** Sube el fichero al bucket aislado y registra el documento. */
-  async function subirDocumento(expedienteId, tipo, file) {
+  /* Un documento puede llegar en varias caras (anverso y reverso de un DNI) y
+     son varias filas del MISMO tipo. La tabla no tiene columna para la cara y
+     no hace falta: viaja en el nombre del objeto,
+
+         <expediente_id>/<tipo>.<cara>-<timestamp>.<ext>
+
+     que es un dato del propio archivo. La política del bucket solo mira la
+     primera carpeta (el expediente), así que el sufijo es libre. Un objeto sin
+     `.cara` —los de antes de esto— se lee como el documento entero, que es lo
+     que era: un único archivo con lo que hubiera. */
+
+  var RE_CARA = /\/[^/]+?\.([a-z0-9_]+)-\d+\.[^.]+$/;
+
+  /** Qué cara del documento es este archivo. Sin marca → el documento entero. */
+  function caraDocumento(doc) {
+    var m = doc && doc.storage_path ? RE_CARA.exec(doc.storage_path) : null;
+    return m ? m[1] : 'completo';
+  }
+
+  function rutaDocumento(expedienteId, tipo, cara, file) {
     var ext = (file.name.split('.').pop() || 'bin').toLowerCase();
-    var path = expedienteId + '/' + tipo + '-' + Date.now() + '.' + ext;
+    var sufijo = (cara && cara !== 'completo') ? '.' + cara : '';
+    return expedienteId + '/' + tipo + sufijo + '-' + Date.now() + '.' + ext;
+  }
+
+  /**
+   * Sube el fichero al bucket aislado y registra el documento.
+   *
+   * `cara` dice qué parte del documento es. Lo que se sustituye depende de
+   * ella, y la regla es la que espera quien lo sube: subir el *anverso*
+   * reemplaza al anverso anterior y **deja el reverso en su sitio**; subir el
+   * documento *completo* reemplaza a todo, porque es todo.
+   */
+  async function subirDocumento(expedienteId, tipo, file, cara) {
+    var path = rutaDocumento(expedienteId, tipo, cara, file);
 
     var up = await sb.storage.from(C.BUCKET_DOCS).upload(path, file, {
       cacheControl: '3600',
@@ -133,9 +164,13 @@
     });
     if (up.error) throw new Error('No se pudo subir el archivo: ' + up.error.message);
 
-    // Un documento por tipo y expediente: sustituimos el anterior si existía.
-    var previos = unwrap(await sb.from(C.TABLA_DOCUMENTOS).select('id, storage_path')
+    var delTipo = unwrap(await sb.from(C.TABLA_DOCUMENTOS).select('id, storage_path')
       .eq('expediente_id', expedienteId).eq('tipo', tipo));
+
+    var esCompleto = !cara || cara === 'completo';
+    var previos = (delTipo || []).filter(function (d) {
+      return esCompleto || caraDocumento(d) === cara;
+    });
 
     var nuevo = unwrap(await sb.from(C.TABLA_DOCUMENTOS).insert({
       expediente_id: expedienteId,
@@ -147,7 +182,7 @@
       tamano: file.size
     }).select().single());
 
-    if (previos && previos.length) {
+    if (previos.length) {
       var ids = previos.map(function (d) { return d.id; });
       var paths = previos.map(function (d) { return d.storage_path; }).filter(Boolean);
       await sb.from(C.TABLA_DOCUMENTOS).delete().in('id', ids);
@@ -350,9 +385,8 @@
   }
 
   /** Sube un documento a un expediente ya creado, sin registrar fila todavía. */
-  async function subirArchivo(expedienteId, tipo, file) {
-    var ext = (file.name.split('.').pop() || 'bin').toLowerCase();
-    var path = expedienteId + '/' + tipo + '-' + Date.now() + '.' + ext;
+  async function subirArchivo(expedienteId, tipo, file, cara) {
+    var path = rutaDocumento(expedienteId, tipo, cara, file);
     var up = await sb.storage.from(C.BUCKET_DOCS).upload(path, file, {
       cacheControl: '3600', upsert: false,
       contentType: file.type || 'application/octet-stream'
@@ -427,6 +461,7 @@
     cambiarActivo: cambiarActivo,
     listarDocumentos: listarDocumentos,
     subirDocumento: subirDocumento,
+    caraDocumento: caraDocumento,
     borrarDocumento: borrarDocumento,
     urlDocumento: urlDocumento,
     urlsDocumentos: urlsDocumentos,
