@@ -110,8 +110,42 @@
     return unwrap(await sb.from(C.TABLA_EXPEDIENTES).update(datos).eq('id', id).select().single());
   }
 
+  /* Borra SOLO la fila. La FK se lleva en cascada las de documentos, pero los
+     archivos del bucket se quedan donde están — y, sin expediente, la política
+     de storage ya no autoriza borrarlos: huérfanos sin llave.
+
+     No se usa desde la interfaz por eso mismo: para borrar un expediente está
+     `borrarExpedienteCompleto`. Se deja porque es la operación cruda de la
+     tabla y sirve para un expediente que nunca llegó a tener archivos. */
   async function borrarExpediente(id) {
     return unwrap(await sb.from(C.TABLA_EXPEDIENTES).delete().eq('id', id));
+  }
+
+  /**
+   * Borra el expediente ENTERO: archivos del bucket, filas de documentos y
+   * expediente, en ese orden.
+   *
+   * Va por Edge Function porque el orden importa y el navegador no puede
+   * garantizarlo: si se le corta la conexión a mitad, deja el expediente medio
+   * borrado. Allí es una sola llamada que o hace todos los pasos o se para en
+   * el primero que falle, sin dejar archivos sin dueño.
+   */
+  async function borrarExpedienteCompleto(id) {
+    var res = await fetch(C.SUPABASE_URL + '/functions/v1/' + C.FN_BORRAR_EXPEDIENTE, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': C.SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + (global.GTAuth.getToken() || '')
+      },
+      body: JSON.stringify({ expediente_id: id })
+    });
+    var data = await res.json().catch(function () { return {}; });
+    if (!res.ok || data.error) {
+      throw new Error((data.error || 'No se pudo borrar el expediente')
+        + (data.detalle ? ' — ' + data.detalle : ''));
+    }
+    return data;
   }
 
   /* ---------------- Documentos ---------------- */
@@ -506,6 +540,7 @@
     actualizarExpediente: actualizarExpediente,
     reasignarExpediente: reasignarExpediente,
     borrarExpediente: borrarExpediente,
+    borrarExpedienteCompleto: borrarExpedienteCompleto,
     buscarExpedientes: buscarExpedientes,
     listarUsuarios: listarUsuarios,
     crearGestor: crearGestor,

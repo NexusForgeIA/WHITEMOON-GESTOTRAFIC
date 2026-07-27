@@ -160,6 +160,7 @@ desplegar gestotrafic-itp        no
 desplegar gestia-extraer         si
 desplegar gestotrafic-valor-base si
 desplegar gestotrafic-expediente si
+desplegar gestotrafic-borrar-expediente si
 
 # ------------------------------------------------------------
 # 5 · Secretos

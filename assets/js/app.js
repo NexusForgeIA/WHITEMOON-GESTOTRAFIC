@@ -80,7 +80,10 @@
 
   /* ---------------- Modal ---------------- */
 
-  function modal({ titulo, cuerpo, okTexto = 'Guardar', onOk, ancho }) {
+  /* `peligro` pinta de rojo el botón de confirmar. En un diálogo destructivo,
+     que el botón de aceptar sea idéntico al de guardar un cambio cualquiera
+     es media confirmación de menos. */
+  function modal({ titulo, cuerpo, okTexto = 'Guardar', onOk, ancho, peligro }) {
     const back = document.createElement('div');
     back.className = 'modal-back';
     back.innerHTML = `<div class="modal" ${ancho ? `style="max-width:${ancho}px"` : ''} role="dialog" aria-modal="true">
@@ -88,7 +91,7 @@
       <div class="modal-body">${cuerpo}</div>
       <div class="modal-foot">
         <button class="btn btn-ghost" data-cerrar>Cancelar</button>
-        <button class="btn" data-ok>${h(okTexto)}</button>
+        <button class="btn ${peligro ? 'btn-danger' : ''}" data-ok>${h(okTexto)}</button>
       </div>
     </div>`;
     document.body.appendChild(back);
@@ -1040,7 +1043,7 @@
         </div>
         <div class="row-actions">
           <div id="slot-estado"></div>
-          ${GTAuth.isAdmin() ? `<button class="btn btn-danger btn-sm" id="btn-borrar-exp">Eliminar</button>` : ''}
+          ${puedeBorrar(exp) ? `<button class="btn btn-danger btn-sm" id="btn-borrar-exp">Eliminar</button>` : ''}
         </div>
       </div>
 
@@ -1079,16 +1082,55 @@
     );
 
     const btnDel = view.querySelector('#btn-borrar-exp');
-    if (btnDel) btnDel.addEventListener('click', () => modal({
+    if (btnDel) btnDel.addEventListener('click', () => confirmarBorrado(exp, docs));
+  }
+
+  /** ¿Puede este usuario borrar este expediente? Admin, cualquiera; gestor,
+      los suyos. Mismo criterio que el RLS y que la Edge Function, que es
+      quien manda: esto solo decide si se enseña el botón. */
+  const puedeBorrar = (exp) =>
+    GTAuth.isAdmin() || (session && exp.gestor_id === session.id);
+
+  /* Borrar es irreversible y no hay papelera: el diálogo dice exactamente qué
+     se lleva por delante —cuántos documentos y cuántos archivos— en vez de un
+     "¿estás seguro?" que no informa de nada. */
+  function confirmarBorrado(exp, docs) {
+    const n = docs.length;
+    const porTipo = archivosPorTipo(docs);
+    const lista = Object.keys(porTipo).map(t => {
+      const etiqueta = (t === 'expediente_completo')
+        ? 'Copias generadas para el Colegio'
+        : t.replace(/_/g, ' ');
+      return `<li>${h(etiqueta)} · ${porTipo[t].length} archivo${porTipo[t].length === 1 ? '' : 's'}</li>`;
+    }).join('');
+
+    modal({
       titulo: 'Eliminar expediente',
-      cuerpo: `<p>¿Eliminar el expediente <b>${h(exp.referencia)}</b> y toda su documentación?</p>`,
-      okTexto: 'Eliminar',
+      okTexto: 'Eliminar definitivamente',
+      peligro: true,
+      cuerpo: `
+        <p style="margin-top:0">Se va a eliminar el expediente
+          <b>${h(exp.referencia)}</b>${exp.matricula ? ' · ' + h(exp.matricula) : ''}
+          ${exp.cliente ? ' · ' + h(nombreCliente(exp.cliente)) : ''}.</p>
+
+        ${n ? `<p style="margin-bottom:6px">Con él se borran <b>${n} documento${n === 1 ? '' : 's'}</b>
+            y sus archivos del bucket:</p>
+          <ul style="margin:0 0 12px;padding-left:20px;font-size:.84rem;color:var(--muted)">${lista}</ul>`
+          : '<p>No tiene ningún documento adjunto.</p>'}
+
+        <div class="regul-note" style="margin:0">
+          ${svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>')}
+          <div><b>Esto no se puede deshacer.</b> No hay papelera: los archivos se
+            borran del bucket y el expediente desaparece del listado y del Kanban.</div>
+        </div>`,
       onOk: async () => {
-        await GTApi.borrarExpediente(id);
-        toast('Expediente eliminado', 'ok');
+        const r = await GTApi.borrarExpedienteCompleto(exp.id);
+        toast(`${r.referencia} eliminado · ${r.objetos_borrados} archivo${r.objetos_borrados === 1 ? '' : 's'}`
+          + ` y ${r.filas_borradas} documento${r.filas_borradas === 1 ? '' : 's'}`, 'ok');
+        // El listado se vuelve a pedir al entrar, así que basta con navegar.
         location.hash = '#/expedientes';
       }
-    }));
+    });
   }
 
   /* ---------- Gest-IA · aviso de validación pendiente ---------- */

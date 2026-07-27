@@ -35,6 +35,10 @@ window.GT_CONFIG = {
      bucket privado con el service_role. */
   FN_EXPEDIENTE: 'gestotrafic-expediente',
 
+  /* Borra un expediente entero —archivos, documentos y expediente— en el
+     orden que exige la política del bucket. */
+  FN_BORRAR_EXPEDIENTE: 'gestotrafic-borrar-expediente',
+
   // Datos de la gestoría que aparecen en el contrato generado
   GESTORIA: {
     nombre: 'GestoTrafic · Gestoría de Tráfico',
