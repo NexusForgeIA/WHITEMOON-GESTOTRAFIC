@@ -2018,7 +2018,7 @@
 
       ${htmlExpedienteCompleto(tr, exp, aplicables, porTipo)}`;
 
-    activarExpedienteCompleto(exp, tr, aplicables, cont);
+    activarExpedienteCompleto(exp, tr, docs, cont);
 
     cont.querySelectorAll('input[type="file"]').forEach(inp => {
       inp.addEventListener('change', async () => {
@@ -2112,93 +2112,95 @@
         </div>` : ''}
 
         <label class="flex" style="font-size:.8rem;color:var(--muted);margin-bottom:14px;cursor:pointer">
-          <input type="checkbox" id="chk-guardar-exp" style="width:auto" checked>
+          <input type="checkbox" id="chk-guardar-exp" style="width:auto">
           Guardar una copia en el expediente (queda registro de lo que se envió)
         </label>
 
         <div class="row-actions">
-          <button class="btn" id="btn-exp-completo">Generar expediente completo</button>
+          <button class="btn" data-generar="html">Generar y descargar HTML</button>
+          <button class="btn btn-ghost" data-generar="pdf">Generar y descargar PDF</button>
         </div>
 
         <div id="exp-completo-salida"></div>
 
         <p class="t-muted" style="font-size:.76rem;margin:14px 0 0">
           Se genera <b>en el servidor</b>: los documentos se leen del bucket privado con la clave de
-          servicio y de vuelta solo llegan dos enlaces firmados que caducan en 1 hora. El navegador
-          nunca ve una clave ni una URL de cada archivo suelto.
+          servicio y el archivo baja en la propia respuesta. <b>Sin guardar copia no se escribe nada</b>
+          en el bucket. Marcando la casilla sí queda archivado, y esa copia se recupera con un enlace
+          firmado que caduca en 1 hora.
         </p>
       </div>`;
   }
 
-  function activarExpedienteCompleto(exp, tr, aplicables, cont) {
-    const btn = cont.querySelector('#btn-exp-completo');
-    if (!btn) return;
+  function activarExpedienteCompleto(exp, tr, docs, cont) {
+    const botones = cont.querySelectorAll('[data-generar]');
+    if (!botones.length) return;
     const salida = cont.querySelector('#exp-completo-salida');
 
-    btn.addEventListener('click', async () => {
-      btn.disabled = true;
-      btn.innerHTML = '<span class="spinner"></span> Reuniendo la documentación…';
-      salida.innerHTML = '';
+    botones.forEach(btn => {
+      const formato = btn.dataset.generar;
+      const etiqueta = btn.textContent;
 
-      try {
-        const r = await GTApi.generarExpediente(exp.id, {
-          tramite: tr.nombre,
-          secciones: seccionesDe(tr, exp),
-          gestoria: window.GT_CONFIG.GESTORIA,
-          colegio: window.GT_COLEGIO(),
-          guardar: !!cont.querySelector('#chk-guardar-exp').checked
-        });
+      btn.addEventListener('click', async () => {
+        const guardar = !!cont.querySelector('#chk-guardar-exp').checked;
+        botones.forEach(b => { b.disabled = true; });
+        btn.innerHTML = '<span class="spinner"></span> Reuniendo la documentación…';
+        salida.innerHTML = '';
 
-        const kb = (n) => Math.round((n || 0) / 1024) + ' KB';
-        salida.innerHTML = `
-          <div class="doc-row ok" style="margin-top:14px">
-            <div class="doc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
-            <div class="doc-info">
-              <strong>Expediente completo generado</strong>
-              <small>${r.incluidos.length} documento${r.incluidos.length === 1 ? '' : 's'} incluido${r.incluidos.length === 1 ? '' : 's'}${r.faltan.length ? ` · ${r.faltan.length} pendiente${r.faltan.length === 1 ? '' : 's'} en el índice` : ''}${r.guardado ? ' · copia guardada en el expediente' : ''}</small>
-            </div>
-            <div class="doc-actions">
-              ${r.html.url ? `<button class="btn btn-sm" data-bajar="${h(r.html.url)}"
-                data-mime="text/html;charset=utf-8" data-nombre="expediente-${h(r.referencia)}.html">HTML · ${kb(r.html.bytes)}</button>` : ''}
-              ${r.pdf.url ? `<button class="btn btn-sm" data-bajar="${h(r.pdf.url)}"
-                data-mime="application/pdf" data-nombre="expediente-${h(r.referencia)}.pdf">PDF · ${kb(r.pdf.bytes)}</button>` : ''}
-            </div>
-          </div>
-          <p class="t-muted" style="font-size:.74rem;margin:8px 0 0">
-            Los dos enlaces caducan en 1 hora. Vuelve a generarlo cuando lo necesites.
-          </p>`;
-
-        /* El enlace firmado se sirve como `text/plain` —Storage no devuelve
-           HTML ejecutable desde su dominio, y hace bien—, así que abrirlo
-           directamente enseñaría el código fuente. Se baja el archivo y se
-           entrega como fichero con su tipo real: el que se sube al Colegio. */
-        salida.querySelectorAll('[data-bajar]').forEach(b => {
-          b.addEventListener('click', async () => {
-            const txt = b.textContent;
-            b.disabled = true; b.innerHTML = '<span class="spinner"></span>';
-            try {
-              const res = await fetch(b.dataset.bajar);
-              if (!res.ok) throw new Error('El enlace ha caducado. Vuelve a generarlo.');
-              descargarBlob(new Blob([await res.arrayBuffer()], { type: b.dataset.mime }), b.dataset.nombre);
-            } catch (e) {
-              toast(e.message || 'No se pudo descargar', 'err');
-            }
-            b.disabled = false; b.textContent = txt;
+        try {
+          /* El archivo llega en el cuerpo de la respuesta y se entrega tal
+             cual: no hay enlace intermedio ni copia en el bucket que alguien
+             tenga que ir a borrar luego. */
+          const r = await GTApi.generarExpediente(exp.id, {
+            formato: formato,
+            tramite: tr.nombre,
+            secciones: seccionesDe(tr, exp),
+            gestoria: window.GT_CONFIG.GESTORIA,
+            colegio: window.GT_COLEGIO(),
+            guardar: guardar
           });
-        });
 
-        toast('Expediente completo generado', 'ok');
-        if (r.guardado) {
-          const nuevos = await GTApi.listarDocumentos(exp.id);
-          salida.insertAdjacentHTML('beforeend',
-            `<p class="t-muted" style="font-size:.74rem;margin:4px 0 0">Copia registrada · ${nuevos.length} documentos en el expediente.</p>`);
+          descargarBlob(r.blob, r.nombre);
+
+          const s = r.resumen || {};
+          const incluidos = s.incluidos || [];
+          const faltan = s.faltan || [];
+          salida.innerHTML = `
+            <div class="doc-row ok" style="margin-top:14px">
+              <div class="doc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+              <div class="doc-info">
+                <strong>${h(r.nombre)} · descargado</strong>
+                <small>${incluidos.length} documento${incluidos.length === 1 ? '' : 's'} incluido${incluidos.length === 1 ? '' : 's'}${faltan.length
+                  ? ` · ${faltan.length} pendiente${faltan.length === 1 ? '' : 's'} en el índice` : ''} ·
+                  ${Math.round((r.blob.size || 0) / 1024)} KB</small>
+              </div>
+              <div class="doc-actions">
+                <span class="badge badge-${s.guardado ? 'recibido' : 'pendiente'}">${s.guardado
+                  ? 'Copia archivada' : 'Sin archivar'}</span>
+              </div>
+            </div>
+            <p class="t-muted" style="font-size:.74rem;margin:8px 0 0">
+              ${s.guardado
+                ? 'La copia queda en el expediente, abajo en <b>Copias generadas</b>.'
+                : 'No se ha guardado copia: el archivo no existe en ningún sitio salvo en tu descarga.'}
+            </p>`;
+
+          toast('Expediente completo descargado', 'ok');
+
+          // Con copia guardada aparece una fila nueva: hay que repintar.
+          if (s.guardado) {
+            const nuevos = await GTApi.listarDocumentos(exp.id);
+            docs.length = 0; nuevos.forEach(d => docs.push(d));
+            panelDocs(exp, tr, docs, cont);
+            return;
+          }
+        } catch (err) {
+          toast(err.message || 'No se pudo generar', 'err');
         }
-      } catch (err) {
-        toast(err.message || 'No se pudo generar', 'err');
-      }
 
-      btn.disabled = false;
-      btn.textContent = 'Generar expediente completo';
+        botones.forEach(b => { b.disabled = false; });
+        btn.textContent = etiqueta;
+      });
     });
   }
 

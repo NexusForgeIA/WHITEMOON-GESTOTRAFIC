@@ -398,12 +398,17 @@
   /* ---------------- Expediente completo (Colegio) ---------------- */
 
   /**
-   * Genera la documentación del expediente junta, en HTML y en PDF.
+   * Genera la documentación del expediente junta, en el formato pedido
+   * ('html' o 'pdf'), y devuelve `{ blob, nombre, resumen }`.
    *
-   * Va por Edge Function porque los documentos viven en un bucket PRIVADO:
-   * allí se bajan con el service_role y de vuelta solo llegan dos enlaces
-   * firmados que caducan. El navegador no ve ninguna clave ni una URL por
-   * archivo suelto.
+   * Va por Edge Function porque los documentos viven en un bucket PRIVADO: se
+   * bajan allí con el service_role y el navegador no ve ninguna clave ni una
+   * URL por archivo suelto.
+   *
+   * El documento viene en el CUERPO de la respuesta, no por enlace firmado.
+   * Así, sin `guardar`, no se escribe nada en el bucket y no queda ningún
+   * fichero suelto que nadie reclame. El resumen de lo que lleva dentro viaja
+   * en la cabecera `X-Expediente-Resumen`, porque el cuerpo ya es el archivo.
    */
   async function generarExpediente(expedienteId, datos) {
     var res = await fetch(C.SUPABASE_URL + '/functions/v1/' + C.FN_EXPEDIENTE, {
@@ -415,9 +420,31 @@
       },
       body: JSON.stringify(Object.assign({ expediente_id: expedienteId }, datos))
     });
-    var data = await res.json().catch(function () { return {}; });
-    if (!res.ok || data.error) throw new Error(data.error || 'No se pudo generar el expediente completo');
-    return data;
+
+    // Los errores sí vienen en JSON: se distinguen por el tipo de contenido.
+    var tipo = res.headers.get('Content-Type') || '';
+    if (!res.ok || tipo.indexOf('application/json') !== -1) {
+      var err = await res.json().catch(function () { return {}; });
+      throw new Error(err.error || 'No se pudo generar el expediente completo');
+    }
+
+    var cabecera = res.headers.get('X-Expediente-Resumen');
+    var resumen = {};
+    if (cabecera) {
+      try {
+        var bin = atob(cabecera);
+        var bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        resumen = JSON.parse(new TextDecoder().decode(bytes));
+      } catch (e) { resumen = {}; }
+    }
+
+    var nombre = (datos.formato === 'pdf' ? 'expediente-completo.pdf' : 'expediente-completo.html');
+    var cd = res.headers.get('Content-Disposition') || '';
+    var m = /filename="([^"]+)"/.exec(cd);
+    if (m) nombre = m[1];
+
+    return { blob: await res.blob(), nombre: nombre, resumen: resumen };
   }
 
   /** Registra en el checklist un archivo ya subido. */
