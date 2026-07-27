@@ -196,7 +196,33 @@ plazo de 30 días, comunicación de venta, fuero) y espacios de firma. Se imprim
 o se guarda como PDF desde el navegador. Los campos que falten aparecen como
 huecos en blanco y se avisa en pantalla de cuáles son.
 
-### 8 · Expediente completo para el Colegio
+### 8 · Eliminar un expediente
+
+Un expediente equivocado se borra desde su ficha, y se borra **entero**:
+archivos del bucket, filas de `gestotrafic_documentos` y expediente. En ese
+orden, que no es cosmético.
+
+> La política del bucket autoriza el borrado comprobando que **el expediente
+> existe**. Borrarlo primero hace dos cosas a la vez: la FK en cascada se lleva
+> las filas de documentos —y con ellas el registro de qué archivo era cuál— y la
+> política deja de autorizar nada sobre esa carpeta. Los ficheros se quedan ahí,
+> **huérfanos y sin llave**. Por eso los objetos van primero, y si su borrado
+> falla el proceso se para: mejor un expediente entero que se puede reintentar
+> que medio expediente que ya no se puede arreglar.
+
+Va por Edge Function (`gestotrafic-borrar-expediente`) porque el orden importa y
+el navegador no puede garantizarlo: si se le corta la conexión a mitad, deja el
+expediente a medio borrar.
+
+**Quién puede**: el admin, cualquiera; un gestor, los suyos. Mismo criterio que
+el RLS, comprobado otra vez en la función porque usa el `service_role` y el RLS
+no la frena — un gestor que llame a la función a mano recibe un 403.
+
+El diálogo de confirmación **dice qué se lleva por delante**: referencia,
+matrícula, cliente y el desglose de documentos y archivos (el DNI aparece con sus
+dos caras). No hay papelera y el diálogo lo dice.
+
+### 9 · Expediente completo para el Colegio
 
 Un botón en la pestaña *Documentación* reúne **toda** la documentación en un solo
 documento y lo devuelve en **dos formatos**:
@@ -263,6 +289,7 @@ assets/js/contrato.js               Generador del contrato
 assets/js/app.js                    Router y vistas
 supabase/functions/gestotrafic-auth       Login y alta de gestores (bcrypt)
 supabase/functions/gestotrafic-expediente Expediente completo (HTML + PDF)
+supabase/functions/gestotrafic-borrar-expediente  Borrado limpio de un expediente
 ```
 
 El orden de carga importa: `config.js` → `auth.js` → `api.js`. `api.js` necesita
