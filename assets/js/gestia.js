@@ -139,11 +139,26 @@
       });
     });
 
-    /* Una factura de venta implica que quien vende es una empresa. */
-    const conFactura = (lecturas || []).some(d => d.tipo === 'factura_venta' || d.tipo === 'cif_vendedor');
-    if (conFactura && campos.indexOf('vendedor_tipo') !== -1) {
-      out.vendedor_tipo = { valor: 'empresa', confianza: 'alta', origen: 'checklist',
-        nota: 'La venta se documenta con factura de empresa.' };
+    /* Qué documento se ha aportado dice qué es cada parte: un CIF identifica
+       a una empresa, y una factura de venta la emite una empresa. No es una
+       lectura del modelo sino del checklist, así que va con confianza alta
+       y su origen declarado — pero sigue siendo propuesta: la valida el
+       gestor como todo lo demás.
+
+       Encaja con la exención de ITP que ya existe: con `vendedor_tipo` en
+       empresa, la pestaña de ITP avisa de que la venta con factura suele
+       quedar exenta. El toggle lo marca el gestor, nunca esto. */
+    const hay = (...tipos) => (lecturas || []).some(d => tipos.indexOf(d.tipo) !== -1);
+    const marcarEmpresa = (parte, nota) => {
+      if (campos.indexOf(parte + '_tipo') === -1) return;
+      out[parte + '_tipo'] = { valor: 'empresa', confianza: 'alta', origen: 'checklist', nota: nota };
+    };
+
+    if (hay('factura_venta', 'cif_vendedor')) {
+      marcarEmpresa('vendedor', 'La venta se documenta con factura o CIF de empresa.');
+    }
+    if (hay('cif_comprador')) {
+      marcarEmpresa('comprador', 'Se ha aportado el CIF de la empresa compradora.');
     }
 
     return out;

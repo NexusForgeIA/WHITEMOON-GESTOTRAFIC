@@ -345,19 +345,32 @@
   }
 
   /* ------------------------------------------------------------
-     Vendedor particular / empresa
-     Si el vendedor es una empresa, el gestor la elige del listado de
-     clientes y sus datos se vuelcan: no se reescriben a mano.
+     Partes particular / empresa (vendedor y comprador)
+     El tipo de cada parte cambia dos cosas en el formulario: la etiqueta
+     de sus campos de identidad (DNI / NIF → CIF) y, en el vendedor, que
+     sus datos se vuelquen de la ficha de cliente en vez de escribirse a
+     mano. La tercera —qué documento pide el checklist— la resuelve el
+     catálogo con los `si` de cada documento.
      ------------------------------------------------------------ */
-  const CAMPOS_VENDEDOR = ['vendedor_nombre', 'vendedor_nif', 'vendedor_direccion', 'vendedor_telefono'];
 
-  function activarVendedorEmpresa(root) {
-    const selTipo = root.querySelector('[name="vendedor_tipo"]');
-    if (!selTipo) return;                       // trámite sin vendedor configurable
+  /** `vendedor_nif` → `vendedor`. */
+  const parteDeCampo = (n) => (n.indexOf('_') === -1 ? null : n.slice(0, n.indexOf('_')));
+
+  function activarTipoParte(root) {
+    const selTipo = {};
+    T.PARTES.forEach(p => {
+      const sel = root.querySelector(`[name="${p}_tipo"]`);
+      if (sel) selTipo[p] = sel;
+    });
+    if (!Object.keys(selTipo).length) return;   // trámite sin partes configurables
+
     const selEmpresa = root.querySelector('[name="vendedor_empresa_id"]');
+    const esEmpresa = (parte) => !!selTipo[parte] && selTipo[parte].value === 'empresa';
 
     const set = (n, v) => { const el = root.querySelector(`[name="${n}"]`); if (el) el.value = v || ''; };
 
+    /* Solo el vendedor se vuelca: es la única parte con selector de empresa
+       del CRM. El comprador se escribe o se copia del cliente. */
     function volcar() {
       const c = empresas.find(e => e.id === (selEmpresa && selEmpresa.value));
       if (!c) return;
@@ -368,28 +381,39 @@
     }
 
     function sincronizar(volcarAhora) {
-      const esEmpresa = selTipo.value === 'empresa';
-
       root.querySelectorAll('[data-solo-si]').forEach(f => {
         const dep = root.querySelector(`[name="${f.dataset.soloSi}"]`);
         f.classList.toggle('hidden', !dep || dep.value !== f.dataset.soloSiVal);
       });
 
-      root.querySelectorAll('[data-auto-si="empresa"]').forEach(f => {
-        const input = f.querySelector('input');
+      // Cada campo sigue al tipo de SU parte, no al del vendedor.
+      root.querySelectorAll('[data-campo]').forEach(f => {
+        const parte = parteDeCampo(f.dataset.campo || '');
+        if (!parte || !selTipo[parte]) return;
+        const empresa = esEmpresa(parte);
+
         const lbl = f.querySelector('label');
-        if (input) input.readOnly = esEmpresa;
-        if (lbl && lbl.dataset.lSi) lbl.textContent = esEmpresa ? lbl.dataset.lSi : lbl.dataset.l;
-        f.classList.toggle('is-auto', esEmpresa);
+        if (lbl && lbl.dataset.lSi) {
+          lbl.textContent = (empresa ? lbl.dataset.lSi : lbl.dataset.l)
+            + (f.querySelector('[required]') ? ' *' : '');
+        }
+
+        // Bloquear solo lo que rellena la aplicación: lo demás se escribe.
+        if (f.dataset.autoSi === 'empresa') {
+          const input = f.querySelector('input');
+          if (input) input.readOnly = empresa;
+          f.classList.toggle('is-auto', empresa);
+        }
       });
 
       const nota = root.querySelector('[data-nota-empresa]');
-      if (nota) nota.classList.toggle('hidden', !esEmpresa);
+      if (nota) nota.classList.toggle('hidden', !esEmpresa('vendedor'));
 
-      if (esEmpresa && volcarAhora) volcar();
+      if (volcarAhora && esEmpresa('vendedor')) volcar();
     }
 
-    selTipo.addEventListener('change', () => sincronizar(true));
+    Object.keys(selTipo).forEach(p =>
+      selTipo[p].addEventListener('change', () => sincronizar(true)));
     if (selEmpresa) selEmpresa.addEventListener('change', volcar);
     sincronizar(false);                         // al pintar no se pisa lo ya guardado
   }
@@ -908,7 +932,7 @@
       ${footer()}`;
 
     const form = view.querySelector('#form-exp');
-    activarVendedorEmpresa(form);
+    activarTipoParte(form);
 
     form.querySelectorAll('[data-copiar]').forEach(chk => {
       chk.addEventListener('change', () => {
@@ -1798,7 +1822,8 @@
               <dt>Cálculo fiscal</dt><dd>${tr.calculo === 'itp'
                 ? (T.esExentoITP(exp) ? '<span class="badge badge-exento">ITP exento</span>' : 'ITP (automático)')
                 : 'No aplica'}</dd>
-              ${tr.calculo === 'itp' ? `<dt>Vendedor</dt><dd>${T.esVendedorEmpresa(exp) ? 'Empresa / concesionario' : 'Particular'}</dd>` : ''}
+              ${tr.calculo === 'itp' ? `<dt>Vendedor</dt><dd>${T.esVendedorEmpresa(exp) ? 'Empresa / concesionario' : 'Particular'}</dd>
+              <dt>Comprador</dt><dd>${T.esCompradorEmpresa(exp) ? 'Empresa / concesionario' : 'Particular'}</dd>` : ''}
             </dl>
           </div>
           ${GTAuth.isAdmin() ? `<div class="card">
@@ -1821,7 +1846,7 @@
       </div>`;
 
     const form = cont.querySelector('#form-datos');
-    activarVendedorEmpresa(form);
+    activarTipoParte(form);
     decorarPropuestasIA(form, exp);
 
     const selGestor = cont.querySelector('#f-gestor');
@@ -2026,7 +2051,15 @@
     const tr = T.tramite(tipoPre);
     loading('Preparando Gest-IA…');
     const clientes = await cargarClientes();
-    const docs = T.docsDe(tr, {}).filter(d => d.tipo !== 'otros');
+
+    /* Aquí el expediente todavía no existe, así que el checklist no puede
+       leer de él si el vendedor es empresa: hay que preguntarlo ANTES. Sin
+       esta pregunta la lista salía siempre en modo particular y pedía el
+       DNI del vendedor incluso vendiendo un concesionario, que factura. */
+    const camposTipo = T.camposTipoParte(tr);
+    const tipos = {};
+    camposTipo.forEach(c => { tipos[c.n] = c.def || 'particular'; });
+    const docsAplicables = () => T.docsDe(tr, { datos: tipos }).filter(d => d.tipo !== 'otros');
 
     view.innerHTML = `
       ${cabecera()}
@@ -2081,25 +2114,24 @@
               </div>
             </div>` : ''}
 
+          ${camposTipo.length ? `
+            <div class="form-sec">Partes de la operación</div>
+            <p class="t-muted" style="font-size:.79rem;margin:0 0 14px">
+              Decide qué documentos se piden: una <b>empresa</b> se identifica con su
+              <b>CIF</b> y documenta la venta con <b>factura</b>; un <b>particular</b>, con
+              su <b>DNI / NIE</b> y un contrato de compraventa.
+            </p>
+            <div class="form-grid" id="ia-partes">
+              ${camposTipo.map(c => campoHTML(Object.assign({}, c, { full: 0 }), null)).join('')}
+            </div>` : ''}
+
           <div class="form-sec">Documentos del trámite</div>
           <p class="t-muted" style="font-size:.79rem;margin:0 0 14px">
             Sube los que tengas. Gest-IA lee foto o escaneo (JPG, PNG) y PDF, máximo 10 MB por archivo.
             Los que falten los rellena el gestor a mano.
           </p>
 
-          <div id="ia-docs">
-            ${docs.map(d => `
-              <div class="doc-row" data-doc="${h(d.tipo)}">
-                <div class="doc-ico">${svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>')}</div>
-                <div class="doc-info">
-                  <strong>${h(d.label)} ${d.obligatorio ? '' : '<span class="t-muted" style="font-weight:400;font-size:.74rem">· opcional</span>'}</strong>
-                  <small data-nombre>Sin archivo</small>
-                </div>
-                <div class="doc-actions">
-                  <label class="file-label">Elegir<input type="file" accept="image/*,application/pdf" data-tipo="${h(d.tipo)}"></label>
-                </div>
-              </div>`).join('')}
-          </div>
+          <div id="ia-docs"></div>
         </div>
 
         <div class="regul-note">
@@ -2130,24 +2162,70 @@
       btn.disabled = n === 0;
     };
 
-    view.querySelectorAll('#ia-docs input[type="file"]').forEach(inp => {
-      inp.addEventListener('change', () => {
-        const f = inp.files && inp.files[0];
-        const fila = inp.closest('.doc-row');
-        if (!f) return;
-        if (f.size > 10 * 1024 * 1024) { toast('El archivo supera los 10 MB', 'err'); inp.value = ''; return; }
-        elegidos[inp.dataset.tipo] = f;
-        fila.classList.add('ok');
-        fila.querySelector('[data-nombre]').textContent = f.name + ' · ' + Math.round(f.size / 1024) + ' KB';
-        refrescar();
+    const nombreArchivo = (f) => f.name + ' · ' + Math.round(f.size / 1024) + ' KB';
+
+    /** Repinta la lista con los documentos que pide el trámite AHORA. */
+    function pintarDocs() {
+      const cont = view.querySelector('#ia-docs');
+      const aplicables = docsAplicables();
+
+      /* Si una parte pasa a empresa, su DNI deja de pedirse: también se
+         suelta el archivo. Subir el documento de un tipo que el expediente
+         ya no reclama solo sirve para descuadrar el checklist. */
+      Object.keys(elegidos).forEach(t => {
+        if (!aplicables.some(d => d.tipo === t)) delete elegidos[t];
       });
+
+      cont.innerHTML = aplicables.map(d => `
+        <div class="doc-row" data-doc="${h(d.tipo)}">
+          <div class="doc-ico">${svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>')}</div>
+          <div class="doc-info">
+            <strong>${h(d.label)} ${d.obligatorio ? '' : '<span class="t-muted" style="font-weight:400;font-size:.74rem">· opcional</span>'}</strong>
+            <small data-nombre>Sin archivo</small>
+          </div>
+          <div class="doc-actions">
+            <label class="file-label">Elegir<input type="file" accept="image/*,application/pdf" data-tipo="${h(d.tipo)}"></label>
+          </div>
+        </div>`).join('');
+
+      // Los archivos que siguen valiendo se conservan al repintar.
+      aplicables.forEach(d => {
+        const f = elegidos[d.tipo];
+        if (!f) return;
+        const fila = cont.querySelector(`[data-doc="${d.tipo}"]`);
+        fila.classList.add('ok');
+        fila.querySelector('[data-nombre]').textContent = nombreArchivo(f);
+      });
+
+      cont.querySelectorAll('input[type="file"]').forEach(inp => {
+        inp.addEventListener('change', () => {
+          const f = inp.files && inp.files[0];
+          const fila = inp.closest('.doc-row');
+          if (!f) return;
+          if (f.size > 10 * 1024 * 1024) { toast('El archivo supera los 10 MB', 'err'); inp.value = ''; return; }
+          elegidos[inp.dataset.tipo] = f;
+          fila.classList.add('ok');
+          fila.querySelector('[data-nombre]').textContent = nombreArchivo(f);
+          refrescar();
+        });
+      });
+
+      refrescar();
+    }
+
+    view.querySelectorAll('#ia-partes select').forEach(sel => {
+      sel.addEventListener('change', () => { tipos[sel.name] = sel.value; pintarDocs(); });
     });
+    pintarDocs();
 
     btn.addEventListener('click', () => lanzarGestIA(tr, elegidos, {
       cliente_id: val(view, 'cliente_id'),
       valor_boe: view.querySelector('#f-boe-ia') ? num(view, 'valor_boe') : null,
       ccaa: view.querySelector('#f-ccaa-ia') ? val(view, 'ccaa') : null,
-      tipo_vehiculo: view.querySelector('#f-tipo-ia') ? val(view, 'tipo_vehiculo') : null
+      tipo_vehiculo: view.querySelector('#f-tipo-ia') ? val(view, 'tipo_vehiculo') : null,
+      // Lo que el gestor ya ha decidido nace con el expediente: no es un dato
+      // que Gest-IA tenga que adivinar de ningún documento.
+      datos: Object.assign({}, tipos)
     }));
   }
 
@@ -2219,7 +2297,7 @@
         valor_boe: extra.valor_boe || null,
         ccaa: extra.ccaa || null,
         ia_estado: 'pendiente_validacion',
-        datos: {}
+        datos: Object.assign({}, extra.datos || {})
       });
 
       paso(1);
@@ -2235,7 +2313,9 @@
 
       paso(3);
       const props = GTGestIA.propuestas(tr, lectura.documentos);
-      const cambios = GTGestIA.aExpediente(tr, props, {});
+      // `datos` arrastra lo que decidió el gestor (quién vende, quién compra):
+      // aExpediente escribe encima las propuestas, no las borra.
+      const cambios = GTGestIA.aExpediente(tr, props, extra.datos || {});
       // Lo que ya aportó el gestor no cuenta como hueco de la IA.
       const yaPuestos = { valor_boe: extra.valor_boe, ccaa: extra.ccaa };
       cambios.ia_extraccion = {
