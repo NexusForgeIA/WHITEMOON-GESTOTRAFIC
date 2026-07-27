@@ -1152,6 +1152,7 @@
     const dudosos = Object.keys(props).filter(k => props[k].confianza !== 'alta');
     const huecos = ia.huecos || [];
     const caras = ia.avisos_caras || [];
+    const pendientesITP = ia.pendientes_itp || [];
 
     return `<div class="ia-banner">
       <div class="ia-banner-cab">
@@ -1169,8 +1170,17 @@
         ${dudosos.length ? `<span class="ia-chip media">${dudosos.length} a revisar</span>` : ''}
         ${huecos.length ? `<span class="ia-chip baja">${huecos.length} obligatorio${huecos.length === 1 ? '' : 's'} sin leer</span>` : ''}
         ${caras.length ? `<span class="ia-chip baja">${caras.length} documento${caras.length === 1 ? '' : 's'} a medias</span>` : ''}
+        ${exp.itp_importe != null && !pendientesITP.length
+          ? `<span class="ia-chip alta">ITP propuesto · ${h(eur(exp.itp_importe))}</span>` : ''}
         ${exp.ia_modelo ? `<span class="t-muted" style="font-size:.72rem">leído con <span class="t-mono">${h(exp.ia_modelo)}</span></span>` : ''}
       </div>
+
+      ${pendientesITP.length ? `<div class="ia-huecos">
+        ${svg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h4"/>')}
+        <div>El ITP <b>no se ha calculado</b> porque falta ${h(pendientesITP.join('; falta '))}.
+          Complétalo en la pestaña <b>Calculadora ITP</b> — Gest-IA no calcula a medias
+          ni rellena un dato fiscal por aproximación.</div>
+      </div>` : ''}
       ${caras.length ? `<div class="ia-huecos">
         ${svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>')}
         <div>Falta una cara: <b>${caras.map(c => h(c.texto)).join(' · ')}</b>.
@@ -2359,25 +2369,30 @@
             <div class="form-sec">Fiscalidad</div>
             <div class="empresa-note">
               ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
-              <div>El <b>valor BOE</b> no está en ningún documento: sale de la tabla de precios
-                medios del Anexo I. <b>Gest-IA lo propone desde ahí</b> con lo que lea de la ficha
-                técnica y <b>tú confirmas la versión</b> antes de calcular — dos versiones del mismo
-                modelo pueden costar mil euros de diferencia. La <b>CCAA</b> sí la eliges tú: es una
-                decisión, no un dato del papel.</div>
+              <div>Gest-IA <b>propone los tres</b> y calcula el ITP sola: el <b>tipo</b> de la
+                clasificación de la ficha técnica, la <b>CCAA</b> del domicilio del comprador
+                —está en el reverso de su DNI— y el <b>valor BOE</b> de la tabla del Anexo I.
+                Todo queda como <b>propuesta pendiente de tu validación</b>. Lo que no lea con
+                seguridad se queda en blanco y te lo dice; y si encajan <b>varias versiones</b>
+                del modelo <b>no elige ninguna</b> — eso lo fijas tú, que entre dos puede haber
+                mil euros. Rellena algo aquí solo si quieres imponerlo.</div>
             </div>
             <div class="form-grid">
               <div class="field">
                 <label for="f-tipo-ia">Tipo de vehículo</label>
                 <select id="f-tipo-ia" name="tipo_vehiculo">
+                  <option value="">— que lo proponga Gest-IA —</option>
                   ${window.GT_TIPOS_VEHICULO.map(t => `<option value="${h(t.id)}">${h(t.label)}</option>`).join('')}
                 </select>
-                <small class="field-hint">Decide en qué tabla del Anexo I se busca. No se deduce del documento.</small>
+                <small class="field-hint">Sale del campo «clasificación» de la ficha técnica.</small>
               </div>
               <div class="field">
                 <label for="f-ccaa-ia">CCAA del comprador</label>
                 <select id="f-ccaa-ia" name="ccaa">
-                  ${window.GT_CCAA.map(c => `<option ${c === 'Comunidad de Madrid' ? 'selected' : ''}>${h(c)}</option>`).join('')}
+                  <option value="">— que la proponga Gest-IA —</option>
+                  ${window.GT_CCAA.map(c => `<option>${h(c)}</option>`).join('')}
                 </select>
+                <small class="field-hint">Sale de la provincia del domicilio del comprador.</small>
               </div>
               <div class="field">
                 <label for="f-boe-ia">Valor BOE Anexo I (€) <span class="t-muted" style="font-weight:400">· opcional</span></label>
@@ -2576,7 +2591,8 @@
       'Creando el expediente…',
       'Subiendo ' + claves.length + ' archivo' + (claves.length === 1 ? '' : 's') + '…',
       'Gest-IA está leyendo los documentos…',
-      'Montando el expediente…'
+      'Montando el expediente…',
+      'Calculando el ITP con lo propuesto…'
     ];
 
     view.innerHTML = `${cabecera()}
@@ -2639,14 +2655,29 @@
       cambios.ia_modelo = lectura.modelo;
       await GTApi.actualizarExpediente(exp.id, cambios);
 
-      /* 4 · Valor base del Anexo I. Gest-IA lo PROPONE desde la tabla; la fila
-         concreta la confirma el gestor antes de que se calcule nada. El valor
-         que haya escrito a mano manda y se salta la confirmación. */
+      /* 4 · El ITP, de punta a punta.
+         Lo que el gestor haya fijado a mano manda siempre; lo que no, lo
+         propone Gest-IA. Nada de esto queda confirmado: el expediente sigue
+         en `pendiente_validacion` hasta que una persona lo valide. */
+      if (tr.calculo !== 'itp') {
+        await terminarGestIA(exp, cambios.ia_extraccion, []);
+        return;
+      }
+
+      const tipo = extra.tipo_vehiculo || (props.tipo_vehiculo || {}).valor || null;
+      const ccaa = extra.ccaa || cambios.ccaa || null;
+      const faltan = [];
+
+      // Sin tipo no se sabe en qué tabla del Anexo I buscar, y no se supone.
+      if (!tipo) faltan.push('el tipo de vehículo (la ficha técnica no lo dice con claridad)');
+      if (!ccaa) faltan.push('la CCAA del comprador (no se leyó su provincia)');
+      if (!cambios.fecha_matriculacion) faltan.push('la fecha de 1ª matriculación');
+
       let vb = null;
-      if (tr.calculo === 'itp' && !extra.valor_boe) {
+      if (tipo && !extra.valor_boe) {
         try {
           vb = await GTApi.proponerValorBase({
-            tipo_vehiculo: extra.tipo_vehiculo || 'coche',
+            tipo_vehiculo: tipo,
             marca: cambios.marca || null,
             modelo: cambios.modelo || null,
             fecha_matriculacion: cambios.fecha_matriculacion || null,
@@ -2659,20 +2690,47 @@
         }
       }
 
-      const proponible = vb && (vb.estado === 'propuesta' || vb.estado === 'varios');
-
-      if (proponible) {
-        await confirmarValorBase(tr, exp, cambios, extra, vb);
+      /* Varias versiones con precios distintos: aquí Gest-IA NO elige. Es la
+         regla de la casa y no se negocia — entre dos versiones del mismo
+         modelo puede haber mil euros, y acertar por sorteo no es acertar.
+         Se lleva al gestor a la pantalla donde fija la versión, con todo lo
+         demás ya propuesto. */
+      if (vb && vb.estado === 'varios') {
+        await confirmarValorBase(tr, exp, cambios, Object.assign({}, extra, { tipo_vehiculo: tipo, ccaa }), vb);
         return;
       }
 
-      // Sin propuesta utilizable: se calcula solo si el gestor puso el valor.
-      if (tr.calculo === 'itp' && extra.valor_boe && cambios.fecha_matriculacion) {
-        await calcularYGuardarITP(exp, cambios, extra, { valor_boe: extra.valor_boe });
+      // Base del cálculo: el importe del gestor, o la única fila que encajó.
+      let base = null;
+      if (extra.valor_boe) {
+        base = { valor_boe: extra.valor_boe, tipo_vehiculo: tipo === 'autocaravana' ? 'autocaravana' : 'coche' };
+      } else if (vb && vb.estado === 'propuesta' && (vb.candidatos || []).length === 1) {
+        base = { valor_base_id: vb.candidatos[0].id, tipo_vehiculo: tipo };
+      } else {
+        faltan.push(vb && vb.estado === 'sin_match'
+          ? 'el valor base: ningún precio medio del Anexo I encaja con lo leído'
+          : 'el valor base del Anexo I');
       }
 
-      toast('Gest-IA montó ' + exp.referencia + ' · pendiente de validación', 'ok');
-      location.hash = '#/expedientes/' + exp.id;
+      if (base && !faltan.length) {
+        paso(4);
+        const r = await calcularYGuardarITP(exp, cambios, Object.assign({}, extra, { ccaa }), base);
+        await terminarGestIA(exp, cambios.ia_extraccion,
+          r ? [] : ['el cálculo del ITP falló: revísalo en el expediente'],
+          r ? 'ITP propuesto · ' + exp.referencia + ' pendiente de validación' : null);
+        return;
+      }
+
+      /* No se puede calcular, pero el valor base sí se encontró: se deja
+         puesto. Que falte la CCAA no es motivo para tirar un dato bueno y
+         hacer que el gestor vuelva a buscar la versión a mano. */
+      if (base && base.valor_base_id && vb.candidatos[0].valor_base) {
+        try {
+          await GTApi.actualizarExpediente(exp.id, { valor_boe: vb.candidatos[0].valor_base });
+        } catch (e) { /* el campo se rellena a mano; no bloquea el alta */ }
+      }
+
+      await terminarGestIA(exp, cambios.ia_extraccion, faltan);
 
     } catch (err) {
       view.innerHTML = `${cabecera()}
@@ -2685,6 +2743,25 @@
           : '<a class="btn btn-ghost" href="#/gest-ia">Volver a intentarlo</a>'}
         </div>`;
     }
+  }
+
+  /**
+   * Cierra el alta y lleva al expediente.
+   *
+   * `faltan` son las piezas que Gest-IA no ha podido poner. Se guardan en el
+   * expediente para que el banner las enseñe: no calcular a medias está bien,
+   * pero solo si se dice exactamente qué falta y dónde arreglarlo.
+   */
+  async function terminarGestIA(exp, ia, faltan, mensaje) {
+    if (faltan && faltan.length) {
+      /* Se reescribe la extracción ENTERA con lo pendiente añadido. Guardar
+         solo `pendientes_itp` borraría las propuestas y los huecos, que es
+         justo lo que el gestor necesita para validar. */
+      const completa = Object.assign({}, ia || {}, { pendientes_itp: faltan });
+      try { await GTApi.actualizarExpediente(exp.id, { ia_extraccion: completa }); } catch (e) { /* no bloquea el alta */ }
+    }
+    toast(mensaje || ('Gest-IA montó ' + exp.referencia + ' · pendiente de validación'), 'ok');
+    location.hash = '#/expedientes/' + exp.id;
   }
 
   /* Calcula el ITP y lo guarda. `base` fija de dónde sale el valor: un

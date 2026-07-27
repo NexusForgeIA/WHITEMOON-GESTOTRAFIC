@@ -307,10 +307,16 @@ Sin frameworks ni build: HTML, CSS y JavaScript puro sobre GitHub Pages.
 ### Gest-IA
 
 Alta de expedientes subiendo los documentos: Claude los lee con visión, extrae
-los campos con un nivel de confianza y monta el expediente pre-rellenado con el
-ITP calculado. Queda en **pendiente de validación** hasta que un gestor lo
-confirma; lo que la IA no leyó con claridad queda vacío y resaltado, nunca
-inventado. Detalle en [`GEST-IA.md`](GEST-IA.md).
+los campos con un nivel de confianza y monta el expediente pre-rellenado **con el
+ITP ya calculado**. Los tres datos que antes ponía el gestor —**tipo de
+vehículo**, **CCAA** y **valor base**— los propone también: el tipo sale de la
+clasificación de la ficha técnica y la CCAA de la provincia del domicilio del
+comprador, que está en el reverso de su DNI.
+
+Queda en **pendiente de validación** hasta que un gestor lo confirma; lo que la
+IA no leyó con claridad queda vacío y resaltado, nunca inventado, y si falta
+alguna pieza del ITP **no se calcula a medias**: se dice cuál falta. Detalle en
+[`GEST-IA.md`](GEST-IA.md).
 
 ---
 

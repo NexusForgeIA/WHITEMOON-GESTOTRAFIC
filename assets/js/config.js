@@ -87,6 +87,75 @@ window.GT_CCAA = [
   'Murcia', 'Navarra', 'País Vasco'
 ];
 
+/* --- Provincia → Comunidad Autónoma ---------------------------------------
+   El ITP se liquida en la CCAA de residencia del COMPRADOR, y su provincia
+   sale del reverso de su DNI. Traducir provincia a comunidad es geografía, no
+   fiscalidad: no hay nada que estimar, o la provincia está en esta tabla o no
+   está. Lo que NO se hace es adivinar la provincia a partir de la calle, del
+   código postal o del municipio; eso lo decide el gestor.
+
+   Las claves van sin acentos y en mayúsculas: la comparación normaliza. */
+window.GT_PROVINCIAS = {
+  ALMERIA: 'Andalucía', CADIZ: 'Andalucía', CORDOBA: 'Andalucía', GRANADA: 'Andalucía',
+  HUELVA: 'Andalucía', JAEN: 'Andalucía', MALAGA: 'Andalucía', SEVILLA: 'Andalucía',
+
+  HUESCA: 'Aragón', TERUEL: 'Aragón', ZARAGOZA: 'Aragón',
+
+  ASTURIAS: 'Asturias', OVIEDO: 'Asturias',
+
+  BALEARES: 'Baleares', 'ILLES BALEARS': 'Baleares', 'ISLAS BALEARES': 'Baleares',
+
+  'LAS PALMAS': 'Canarias (IGIC)', 'SANTA CRUZ DE TENERIFE': 'Canarias (IGIC)',
+  TENERIFE: 'Canarias (IGIC)',
+
+  CANTABRIA: 'Cantabria', SANTANDER: 'Cantabria',
+
+  ALBACETE: 'Castilla-La Mancha', 'CIUDAD REAL': 'Castilla-La Mancha',
+  CUENCA: 'Castilla-La Mancha', GUADALAJARA: 'Castilla-La Mancha', TOLEDO: 'Castilla-La Mancha',
+
+  AVILA: 'Castilla y León', BURGOS: 'Castilla y León', LEON: 'Castilla y León',
+  PALENCIA: 'Castilla y León', SALAMANCA: 'Castilla y León', SEGOVIA: 'Castilla y León',
+  SORIA: 'Castilla y León', VALLADOLID: 'Castilla y León', ZAMORA: 'Castilla y León',
+
+  BARCELONA: 'Cataluña', GIRONA: 'Cataluña', GERONA: 'Cataluña',
+  LLEIDA: 'Cataluña', LERIDA: 'Cataluña', TARRAGONA: 'Cataluña',
+
+  BADAJOZ: 'Extremadura', CACERES: 'Extremadura',
+
+  'A CORUNA': 'Galicia', 'LA CORUNA': 'Galicia', LUGO: 'Galicia',
+  OURENSE: 'Galicia', ORENSE: 'Galicia', PONTEVEDRA: 'Galicia',
+
+  'LA RIOJA': 'La Rioja', LOGRONO: 'La Rioja',
+  MADRID: 'Comunidad de Madrid',
+  MURCIA: 'Murcia',
+  NAVARRA: 'Navarra', PAMPLONA: 'Navarra',
+
+  ALAVA: 'País Vasco', ARABA: 'País Vasco', 'VITORIA GASTEIZ': 'País Vasco',
+  GUIPUZCOA: 'País Vasco', GIPUZKOA: 'País Vasco',
+  VIZCAYA: 'País Vasco', BIZKAIA: 'País Vasco',
+
+  ALICANTE: 'Comunidad Valenciana', ALACANT: 'Comunidad Valenciana',
+  CASTELLON: 'Comunidad Valenciana', CASTELLO: 'Comunidad Valenciana',
+  VALENCIA: 'Comunidad Valenciana',
+
+  CEUTA: 'Ceuta', MELILLA: 'Melilla'
+};
+
+/**
+ * CCAA de una provincia leída de un documento, o `null` si no se reconoce.
+ *
+ * Devolver `null` es una respuesta legítima y es lo que se hace ante cualquier
+ * duda: la CCAA cambia el tipo del ITP, así que una equivocada sale más cara
+ * que un hueco que el gestor rellena en dos segundos.
+ */
+window.GT_CCAA_DE_PROVINCIA = function (texto) {
+  if (!texto) return null;
+  var p = String(texto).normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toUpperCase().replace(/[^A-Z ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!p) return null;
+  return window.GT_PROVINCIAS[p] || null;
+};
+
 /* Tipos de vehículo a efectos del Anexo I.
    Los que NO son turismo se tarifan por TRAMO de cilindrada (o de kW en
    eléctricas): el motor resuelve el valor base solo y el campo manual sobra,
