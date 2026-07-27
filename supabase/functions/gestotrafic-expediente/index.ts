@@ -35,10 +35,14 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const BUCKET = 'gestotrafic-docs';
 const CADUCIDAD = 3600;                  // 1 h, como el resto de enlaces firmados
 
+/* El documento se devuelve en el cuerpo, así que el resumen de lo que lleva
+   dentro va en una cabecera propia. Sin `Expose-Headers` el navegador la
+   esconde: en una respuesta de otro origen solo se leen las de la lista. */
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS'
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Expose-Headers': 'Content-Disposition, X-Expediente-Resumen'
 };
 
 const json = (body: unknown, status = 200) =>
@@ -470,9 +474,13 @@ Deno.serve(async (req) => {
     };
     const tramite = String(cuerpo.tramite || 'Expediente');
     const guardar = cuerpo.guardar === true;
+    const formato = cuerpo.formato === 'pdf' ? 'pdf' : 'html';
 
     if (!expedienteId || !secciones.length) {
       return json({ error: 'Faltan el expediente o las secciones del trámite' }, 400);
+    }
+    if (cuerpo.formato !== 'pdf' && cuerpo.formato !== 'html') {
+      return json({ error: 'El formato pedido tiene que ser "html" o "pdf"' }, 400);
     }
 
     // 2 · El expediente tiene que ser suyo (o ser admin). Mismo criterio que el RLS.
@@ -533,61 +541,83 @@ Deno.serve(async (req) => {
       });
     }
 
-    // 4 · Los dos formatos, mismo contenido y mismo orden.
-    const html = construirHTML(exp, cab, tramite, bloques);
-    const pdfBytes = await construirPDF(exp, cab, tramite, bloques);
+    // 4 · Se construye SOLO el formato que se ha pedido.
+    const cuerpoDoc: Uint8Array = formato === 'pdf'
+      ? await construirPDF(exp, cab, tramite, bloques)
+      : new TextEncoder().encode(construirHTML(exp, cab, tramite, bloques));
 
-    const sello = new Date().toISOString().replace(/[:.]/g, '-');
-    const base = `${expedienteId}/expediente-completo-${sello}`;
-    const rutaHtml = `${base}.html`;
-    const rutaPdf = `${base}.pdf`;
+    const mime = formato === 'pdf' ? 'application/pdf' : 'text/html; charset=utf-8';
+    const nombre = `expediente-completo-${exp.referencia || expedienteId}.${formato}`;
 
-    const subida = await Promise.all([
-      sb.storage.from(BUCKET).upload(rutaHtml, html, {
-        contentType: 'text/html; charset=utf-8', upsert: false
-      }),
-      sb.storage.from(BUCKET).upload(rutaPdf, pdfBytes, {
-        contentType: 'application/pdf', upsert: false
-      })
-    ]);
-    const falloSubida = subida.find(s => s.error);
-    if (falloSubida) return json({ error: 'No se pudo guardar el documento generado: ' + falloSubida.error!.message }, 500);
+    /* 5 · El bucket solo se toca si se guarda copia.
+       Antes se escribía siempre, porque el documento se entregaba por enlace
+       firmado y el enlace necesita que el objeto exista. El precio era que
+       cada generación descartada dejaba un fichero sin fila que lo reclamara
+       —y, borrado el expediente, sin política que permitiera ya borrarlo—.
+       Ahora el documento se devuelve en el cuerpo de esta misma respuesta:
+       sin guardar copia no se escribe nada, así que no hay huérfanos que
+       limpiar. No es que se limpien: es que no llegan a existir. */
+    let guardado: { ruta: string; url: string | null } | null = null;
 
-    /* El bucket es privado y sigue siéndolo: lo que sale de aquí son dos
-       enlaces firmados que caducan en una hora. */
-    const [urlHtml, urlPdf] = await Promise.all([
-      sb.storage.from(BUCKET).createSignedUrl(rutaHtml, CADUCIDAD),
-      sb.storage.from(BUCKET).createSignedUrl(rutaPdf, CADUCIDAD)
-    ]);
-
-    // 5 · Copia en el checklist, para que quede registro de lo que se envió.
-    let registrado = false;
     if (guardar) {
-      const ins = await sb.from('gestotrafic_documentos').insert([
-        {
-          expediente_id: expedienteId, tipo: 'expediente_completo', estado: 'recibido',
-          nombre_archivo: `expediente-completo-${exp.referencia || ''}.pdf`,
-          storage_path: rutaPdf, mime: 'application/pdf', tamano: pdfBytes.length
-        },
-        {
-          expediente_id: expedienteId, tipo: 'expediente_completo', estado: 'recibido',
-          nombre_archivo: `expediente-completo-${exp.referencia || ''}.html`,
-          storage_path: rutaHtml, mime: 'text/html', tamano: html.length
-        }
-      ]);
-      registrado = !ins.error;
+      const sello = new Date().toISOString().replace(/[:.]/g, '-');
+      const ruta = `${expedienteId}/expediente-completo-${sello}.${formato}`;
+
+      const subida = await sb.storage.from(BUCKET).upload(ruta, cuerpoDoc, {
+        contentType: mime, upsert: false
+      });
+      if (subida.error) {
+        return json({ error: 'No se pudo guardar la copia: ' + subida.error.message }, 500);
+      }
+
+      /* La fila va DESPUÉS del objeto y, si falla, se retira el objeto: un
+         fichero sin fila es exactamente lo que veníamos a evitar. */
+      const ins = await sb.from('gestotrafic_documentos').insert({
+        expediente_id: expedienteId,
+        tipo: 'expediente_completo',
+        estado: 'recibido',
+        nombre_archivo: nombre,
+        storage_path: ruta,
+        mime: formato === 'pdf' ? 'application/pdf' : 'text/html',
+        tamano: cuerpoDoc.length
+      });
+      if (ins.error) {
+        await sb.storage.from(BUCKET).remove([ruta]);
+        return json({ error: 'No se pudo registrar la copia: ' + ins.error.message }, 500);
+      }
+
+      // El bucket sigue siendo privado: la copia se recupera firmada.
+      const firmada = await sb.storage.from(BUCKET).createSignedUrl(ruta, CADUCIDAD);
+      guardado = { ruta, url: firmada.data?.signedUrl || null };
     }
 
-    return json({
+    /* El resumen —qué ha entrado y qué falta— viaja en una cabecera, porque
+       el cuerpo es el documento. En base64 para que quepa en un header: lleva
+       acentos y una cabecera HTTP solo admite ASCII. */
+    const resumen = {
       referencia: exp.referencia,
+      formato,
       generado_at: new Date().toISOString(),
-      guardado: registrado,
-      html: { path: rutaHtml, url: urlHtml.data?.signedUrl || null, bytes: html.length },
-      pdf: { path: rutaPdf, url: urlPdf.data?.signedUrl || null, bytes: pdfBytes.length },
+      bytes: cuerpoDoc.length,
+      guardado,
       incluidos: bloques.filter(b => b.archivos.length)
         .map(b => ({ tipo: b.tipo, label: b.label, archivos: b.archivos.length })),
       faltan: bloques.filter(b => !b.archivos.length)
         .map(b => ({ tipo: b.tipo, label: b.label, obligatorio: b.obligatorio }))
+    };
+
+    /* `slice()` copia la vista a un buffer propio: sin eso, TypeScript no da
+       el Uint8Array por cuerpo válido y, si la vista fuera parcial, se
+       enviarían bytes de más. */
+    return new Response(cuerpoDoc.slice().buffer as ArrayBuffer, {
+      status: 200,
+      headers: {
+        ...CORS,
+        'Content-Type': mime,
+        'Content-Disposition': `attachment; filename="${nombre}"`,
+        'X-Expediente-Resumen': base64(new TextEncoder().encode(JSON.stringify(resumen))),
+        'Cache-Control': 'no-store'
+      }
     });
 
   } catch (e) {

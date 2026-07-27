@@ -206,6 +206,8 @@ documento y lo devuelve en **dos formatos**:
 | **HTML** | el acceso de expedientes del Colegio | **autocontenido**: imágenes en base64 y PDF incrustados. Un archivo que se abre solo, sin depender de nada externo |
 | **PDF** | archivo y envío | mismo contenido y orden. Cada imagen es una página; los PDF aportados se anexan **página a página** con `pdf-lib`, conservando su texto |
 
+Cada botón genera **su** formato: la función construye solo el que se le pide.
+
 El orden es el del catálogo del trámite, que es el del expediente: portada con
 los datos y el índice, identidad del comprador, identidad del vendedor, permiso,
 ficha técnica, contrato o factura, mandato y lo demás.
@@ -223,10 +225,22 @@ la pantalla avisa de lo que falta, pero **no bloquea**: hay expedientes que se
 presentan incompletos a propósito.
 
 Se genera **en el servidor** (`gestotrafic-expediente`): los documentos viven en
-un bucket privado y se leen con el `service_role`. De vuelta solo llegan dos
-**enlaces firmados** que caducan en 1 hora, previa comprobación de que el
-expediente es de quien lo pide —el mismo criterio que el RLS—. Marcando *guardar
-copia* queda además registrada en el expediente, como constancia de lo enviado.
+un bucket privado y se leen con el `service_role`, previa comprobación de que el
+expediente es de quien lo pide —el mismo criterio que el RLS—.
+
+**El archivo baja en el cuerpo de la respuesta**, con su `Content-Disposition`, y
+el resumen de lo que lleva dentro viaja en la cabecera `X-Expediente-Resumen`.
+Eso significa que **sin marcar *guardar copia* no se escribe nada en el bucket**.
+
+> La primera versión entregaba el documento por enlace firmado, y un enlace
+> necesita que el objeto exista: cada generación descartada dejaba un fichero sin
+> ninguna fila que lo reclamara. Peor aún, borrado el expediente la política de
+> Storage ya no permitía borrarlo — huérfano y sin llave. Los huérfanos no se
+> limpian: **no llegan a existir**.
+
+Marcando *guardar copia* sí se archiva: se sube el objeto **y** se registra su
+fila, en ese orden y con retirada del objeto si la fila falla. Aparece en
+*Copias generadas* del checklist y se recupera con un enlace firmado de 1 hora.
 
 El **Colegio** sale de `GT_COLEGIOS` en `config.js`, por la provincia de la
 gestoría. Solo lleva el nombre oficial: ni direcciones ni códigos inventados. Y
