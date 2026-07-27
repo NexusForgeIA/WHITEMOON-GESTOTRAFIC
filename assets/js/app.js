@@ -1109,6 +1109,7 @@
     const props = ia.propuestas || {};
     const dudosos = Object.keys(props).filter(k => props[k].confianza !== 'alta');
     const huecos = ia.huecos || [];
+    const caras = ia.avisos_caras || [];
 
     return `<div class="ia-banner">
       <div class="ia-banner-cab">
@@ -1125,8 +1126,15 @@
         <span class="ia-chip alta">${Object.keys(props).length - dudosos.length} campos con confianza alta</span>
         ${dudosos.length ? `<span class="ia-chip media">${dudosos.length} a revisar</span>` : ''}
         ${huecos.length ? `<span class="ia-chip baja">${huecos.length} obligatorio${huecos.length === 1 ? '' : 's'} sin leer</span>` : ''}
+        ${caras.length ? `<span class="ia-chip baja">${caras.length} documento${caras.length === 1 ? '' : 's'} a medias</span>` : ''}
         ${exp.ia_modelo ? `<span class="t-muted" style="font-size:.72rem">leído con <span class="t-mono">${h(exp.ia_modelo)}</span></span>` : ''}
       </div>
+      ${caras.length ? `<div class="ia-huecos">
+        ${svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>')}
+        <div>Falta una cara: <b>${caras.map(c => h(c.texto)).join(' · ')}</b>.
+          Los datos de esa cara —el <b>domicilio</b> está en el reverso del DNI— quedan en blanco.
+          Súbela en <b>Documentación</b> y vuelve a leer.</div>
+      </div>` : ''}
       ${huecos.length ? `<div class="ia-huecos">
         ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
         <div>Gest-IA no pudo leer con seguridad: <b>${huecos.map(x => h(x.etiqueta)).join(', ')}</b>.
@@ -1888,17 +1896,41 @@
   }
 
   /* ---------- Panel: Documentación ---------- */
-  async function panelDocs(exp, tr, docs, cont) {
+
+  /** Archivos subidos de cada tipo, con la cara que ocupa cada uno. Un tipo
+      puede tener varias filas: el anverso y el reverso de un DNI. */
+  function archivosPorTipo(docs) {
     const porTipo = {};
-    docs.forEach(d => { porTipo[d.tipo] = d; });
+    (docs || []).forEach(d => {
+      const cara = GTApi.caraDocumento(d);
+      (porTipo[d.tipo] = porTipo[d.tipo] || []).push(Object.assign({ cara: cara }, d));
+    });
+    return porTipo;
+  }
+
+  /** «anverso ✓ · reverso pendiente», para ver de un vistazo qué falta. */
+  function resumenCaras(def, archivos) {
+    if (!T.admiteVariasCaras(def)) return '';
+    const est = T.estadoCaras(def, archivos);
+    if (est.conArchivoCompleto) return 'documento completo en un archivo';
+    if (!archivos.length) return '';
+    return def.caras
+      .map(c => c.id.replace('_', ' ') + (est.presentes.indexOf(c.id) !== -1 ? ' ✓' : ' pendiente'))
+      .join(' · ');
+  }
+
+  async function panelDocs(exp, tr, docs, cont) {
+    const porTipo = archivosPorTipo(docs);
 
     // El bucket es privado: los enlaces se firman al pintar y caducan en 1 h.
     const enlaces = await GTApi.urlsDocumentos(docs);
 
     const aplicables = T.docsDe(tr, exp);
     const obligatorios = aplicables.filter(d => d.obligatorio);
-    const recibidos = obligatorios.filter(d => porTipo[d.tipo]).length;
+    const recibidos = obligatorios.filter(d => (porTipo[d.tipo] || []).length).length;
     const pct = obligatorios.length ? (recibidos / obligatorios.length * 100) : 100;
+
+    const KB = (n) => Math.round((n || 0) / 1024) + ' KB';
 
     cont.innerHTML = `
       <div class="card" style="max-width:860px">
@@ -1910,31 +1942,59 @@
         <div class="checklist-bar"><div class="checklist-fill" style="width:${pct}%"></div></div>
 
         ${aplicables.map(def => {
-          const doc = porTipo[def.tipo];
-          return `<div class="doc-row ${doc ? 'ok' : ''}">
+          const archivos = porTipo[def.tipo] || [];
+          const varias = T.admiteVariasCaras(def);
+          const est = T.estadoCaras(def, archivos);
+          const hay = archivos.length > 0;
+          const incompleto = varias && hay && !est.completo;
+          const resumen = resumenCaras(def, archivos);
+
+          const linea = (doc) => `<div class="doc-cara">
+            <span class="doc-cara-l">${h(T.etiquetaCara(def, doc.cara))}</span>
+            <span class="doc-cara-n">${h(doc.nombre_archivo)} · ${KB(doc.tamano)}</span>
+            ${enlaces[doc.id] ? `<a class="btn btn-ghost btn-sm" href="${h(enlaces[doc.id])}" target="_blank" rel="noopener">Ver</a>` : ''}
+            <button class="btn btn-danger btn-sm" data-del="${h(doc.id)}">Quitar</button>
+          </div>`;
+
+          /* Los botones de subida son uno por cara pendiente más el de
+             documento completo: quien tenga el DNI en un PDF no debería
+             tener que partirlo en dos. */
+          const subir = (cara, texto) => `<label class="file-label">${h(texto)}<input type="file"
+            accept="image/*,application/pdf" data-tipo="${h(def.tipo)}" data-cara="${h(cara)}"></label>`;
+
+          return `<div class="doc-row ${hay ? 'ok' : ''} ${varias ? 'doc-row-caras' : ''}">
             <div class="doc-ico">
-              ${doc
+              ${hay
                 ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`
                 : svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>')}
             </div>
             <div class="doc-info">
               <strong>${h(def.label)} ${def.obligatorio ? '' : '<span class="t-muted" style="font-weight:400;font-size:.74rem">· opcional</span>'}</strong>
-              <small>${doc ? h(doc.nombre_archivo) + ' · ' + Math.round((doc.tamano || 0) / 1024) + ' KB' : 'Sin archivo'}</small>
+              ${varias
+                ? `<small>${hay ? h(resumen) : 'Sin archivo · admite las dos caras o un archivo con todo'}</small>
+                   ${archivos.map(linea).join('')}
+                   <div class="doc-subidas">
+                     ${est.conArchivoCompleto ? '' : est.faltan.map(c => subir(c, 'Subir ' + T.etiquetaCara(def, c))).join('')}
+                     ${subir('completo', hay ? 'Sustituir por el completo' : 'Subir documento completo')}
+                   </div>`
+                : `<small>${hay ? h(archivos[0].nombre_archivo) + ' · ' + KB(archivos[0].tamano) : 'Sin archivo'}</small>`}
             </div>
             <div class="doc-actions">
-              <span class="badge badge-${doc ? 'recibido' : 'pendiente'}">${doc ? 'Recibido' : 'Pendiente'}</span>
-              ${doc ? `${enlaces[doc.id] ? `<a class="btn btn-ghost btn-sm" href="${h(enlaces[doc.id])}" target="_blank" rel="noopener">Ver</a>` : ''}
-                       <button class="btn btn-danger btn-sm" data-del="${h(doc.id)}">Quitar</button>`
-                    : `<label class="file-label">Subir<input type="file" accept="image/*,application/pdf" data-tipo="${h(def.tipo)}"></label>`}
+              <span class="badge badge-${hay ? (incompleto ? 'pendiente' : 'recibido') : 'pendiente'}">${hay ? (incompleto ? 'Incompleto' : 'Recibido') : 'Pendiente'}</span>
+              ${varias ? '' : (hay
+                ? `${enlaces[archivos[0].id] ? `<a class="btn btn-ghost btn-sm" href="${h(enlaces[archivos[0].id])}" target="_blank" rel="noopener">Ver</a>` : ''}
+                   <button class="btn btn-danger btn-sm" data-del="${h(archivos[0].id)}">Quitar</button>`
+                : subir('completo', 'Subir'))}
             </div>
           </div>`;
         }).join('')}
 
         <p class="t-muted" style="font-size:.76rem;margin:14px 0 0">
           Formatos admitidos: foto o escaneo (JPG, PNG) y PDF · máximo 10 MB por archivo.
-          Se guardan en el bucket <b>privado</b> <span class="t-mono">gestotrafic-docs</span>: cada enlace
-          se firma al abrirlo y caduca en 1 hora. Solo el gestor del expediente (o un administrador)
-          puede firmarlo.
+          El <b>DNI</b>, el permiso y la ficha técnica admiten <b>varias caras</b>: se leen juntas como
+          un solo documento. Se guardan en el bucket <b>privado</b>
+          <span class="t-mono">gestotrafic-docs</span>: cada enlace se firma al abrirlo y caduca en
+          1 hora. Solo el gestor del expediente (o un administrador) puede firmarlo.
         </p>
       </div>`;
 
@@ -1946,7 +2006,7 @@
 
         inp.closest('.file-label').innerHTML = '<span class="spinner"></span>';
         try {
-          await GTApi.subirDocumento(exp.id, inp.dataset.tipo, file);
+          await GTApi.subirDocumento(exp.id, inp.dataset.tipo, file, inp.dataset.cara);
           const nuevos = await GTApi.listarDocumentos(exp.id);
           docs.length = 0; nuevos.forEach(d => docs.push(d));
           toast('Documento subido', 'ok');
@@ -2158,11 +2218,18 @@
 
     const refrescar = () => {
       const n = Object.keys(elegidos).length;
-      cuenta.textContent = n + ' documento' + (n === 1 ? '' : 's');
+      cuenta.textContent = n + ' archivo' + (n === 1 ? '' : 's');
       btn.disabled = n === 0;
     };
 
     const nombreArchivo = (f) => f.name + ' · ' + Math.round(f.size / 1024) + ' KB';
+
+    /* Un documento puede traer varias caras, así que la clave de `elegidos`
+       es tipo + cara. `completo` es el documento entero en un archivo. */
+    const clave = (tipo, cara) => tipo + '|' + (cara || 'completo');
+    const archivosDe = (tipo) => Object.keys(elegidos)
+      .filter(k => k.slice(0, k.indexOf('|')) === tipo)
+      .map(k => ({ cara: k.slice(k.indexOf('|') + 1), file: elegidos[k] }));
 
     /** Repinta la lista con los documentos que pide el trámite AHORA. */
     function pintarDocs() {
@@ -2172,41 +2239,66 @@
       /* Si una parte pasa a empresa, su DNI deja de pedirse: también se
          suelta el archivo. Subir el documento de un tipo que el expediente
          ya no reclama solo sirve para descuadrar el checklist. */
-      Object.keys(elegidos).forEach(t => {
-        if (!aplicables.some(d => d.tipo === t)) delete elegidos[t];
+      Object.keys(elegidos).forEach(k => {
+        const tipo = k.slice(0, k.indexOf('|'));
+        if (!aplicables.some(d => d.tipo === tipo)) delete elegidos[k];
       });
 
-      cont.innerHTML = aplicables.map(d => `
-        <div class="doc-row" data-doc="${h(d.tipo)}">
+      cont.innerHTML = aplicables.map(d => {
+        const varias = T.admiteVariasCaras(d);
+        const elegir = (cara, texto) => `<label class="file-label">${h(texto)}<input type="file"
+          accept="image/*,application/pdf" data-tipo="${h(d.tipo)}" data-cara="${h(cara)}"></label>`;
+
+        return `
+        <div class="doc-row ${varias ? 'doc-row-caras' : ''}" data-doc="${h(d.tipo)}">
           <div class="doc-ico">${svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>')}</div>
           <div class="doc-info">
             <strong>${h(d.label)} ${d.obligatorio ? '' : '<span class="t-muted" style="font-weight:400;font-size:.74rem">· opcional</span>'}</strong>
-            <small data-nombre>Sin archivo</small>
+            <small data-nombre>${varias ? 'Las dos caras por separado, o un archivo con todo' : 'Sin archivo'}</small>
+            ${varias ? `<div data-caras></div>
+              <div class="doc-subidas">
+                ${d.caras.map(c => elegir(c.id, c.label)).join('')}
+                ${elegir('completo', 'Documento completo')}
+              </div>` : ''}
           </div>
-          <div class="doc-actions">
-            <label class="file-label">Elegir<input type="file" accept="image/*,application/pdf" data-tipo="${h(d.tipo)}"></label>
-          </div>
-        </div>`).join('');
+          ${varias ? '' : `<div class="doc-actions">${elegir('completo', 'Elegir')}</div>`}
+        </div>`;
+      }).join('');
 
       // Los archivos que siguen valiendo se conservan al repintar.
       aplicables.forEach(d => {
-        const f = elegidos[d.tipo];
-        if (!f) return;
         const fila = cont.querySelector(`[data-doc="${d.tipo}"]`);
+        const archivos = archivosDe(d.tipo);
+        if (!archivos.length) return;
         fila.classList.add('ok');
-        fila.querySelector('[data-nombre]').textContent = nombreArchivo(f);
+
+        if (!T.admiteVariasCaras(d)) {
+          fila.querySelector('[data-nombre]').textContent = nombreArchivo(archivos[0].file);
+          return;
+        }
+        fila.querySelector('[data-nombre]').textContent = resumenCaras(d, archivos) || '';
+        fila.querySelector('[data-caras]').innerHTML = archivos.map(a =>
+          `<div class="doc-cara">
+             <span class="doc-cara-l">${h(T.etiquetaCara(d, a.cara))}</span>
+             <span class="doc-cara-n">${h(nombreArchivo(a.file))}</span>
+           </div>`).join('');
       });
 
       cont.querySelectorAll('input[type="file"]').forEach(inp => {
         inp.addEventListener('change', () => {
           const f = inp.files && inp.files[0];
-          const fila = inp.closest('.doc-row');
           if (!f) return;
           if (f.size > 10 * 1024 * 1024) { toast('El archivo supera los 10 MB', 'err'); inp.value = ''; return; }
-          elegidos[inp.dataset.tipo] = f;
-          fila.classList.add('ok');
-          fila.querySelector('[data-nombre]').textContent = nombreArchivo(f);
-          refrescar();
+          const cara = inp.dataset.cara || 'completo';
+          /* O las caras sueltas, o el archivo con todo: son la misma cosa
+             contada de dos maneras, y tenerlas a la vez solo duplica papel. */
+          if (cara === 'completo') {
+            archivosDe(inp.dataset.tipo).forEach(a => { delete elegidos[clave(inp.dataset.tipo, a.cara)]; });
+          } else {
+            delete elegidos[clave(inp.dataset.tipo, 'completo')];
+          }
+          elegidos[clave(inp.dataset.tipo, cara)] = f;
+          pintarDocs();                          // repinta: cambian las caras que faltan
         });
       });
 
@@ -2261,12 +2353,15 @@
       b.addEventListener('click', () => (location.hash = '#/gest-ia?tipo=' + b.dataset.tipo)));
   }
 
-  /** Crear expediente → subir → leer con IA → volcar propuestas → calcular ITP. */
+  /** Crear expediente → subir → leer con IA → volcar propuestas → calcular ITP.
+      `archivos` viene indexado por `tipo|cara`: un mismo tipo puede traer dos
+      archivos (anverso y reverso), que se suben por separado y los lee juntos
+      la Edge Function. */
   async function lanzarGestIA(tr, archivos, extra) {
-    const tipos = Object.keys(archivos);
+    const claves = Object.keys(archivos);
     const pasos = [
       'Creando el expediente…',
-      'Subiendo ' + tipos.length + ' documento' + (tipos.length === 1 ? '' : 's') + '…',
+      'Subiendo ' + claves.length + ' archivo' + (claves.length === 1 ? '' : 's') + '…',
       'Gest-IA está leyendo los documentos…',
       'Montando el expediente…'
     ];
@@ -2302,8 +2397,10 @@
 
       paso(1);
       const subidos = [];
-      for (const tipo of tipos) {
-        const archivo = await GTApi.subirArchivo(exp.id, tipo, archivos[tipo]);
+      for (const k of claves) {
+        const tipo = k.slice(0, k.indexOf('|'));
+        const cara = k.slice(k.indexOf('|') + 1);
+        const archivo = await GTApi.subirArchivo(exp.id, tipo, archivos[k], cara);
         await GTApi.registrarDocumento(exp.id, tipo, archivo);
         subidos.push({ tipo: tipo, storage_path: archivo.path });
       }
@@ -2322,6 +2419,8 @@
         propuestas: props,
         documentos: lectura.documentos,
         huecos: GTGestIA.huecos(tr, props).filter(x => !yaPuestos[x.campo]),
+        // Una cara que falta no es un dato ilegible: se arregla subiéndola.
+        avisos_caras: GTGestIA.avisosCaras(tr, lectura.documentos),
         analizado_at: new Date().toISOString()
       };
       cambios.ia_modelo = lectura.modelo;

@@ -88,6 +88,23 @@ por exportación, y la denuncia solo en duplicados por robo.
 `gestotrafic_documentos.tipo` se eliminó precisamente para que un checklist
 nuevo no exija una migración.
 
+`caras` es opcional y declara que el documento puede llegar **en varios
+archivos**:
+
+```js
+{ tipo: 'dni_comprador', label: 'DNI / NIE del comprador', obligatorio: true,
+  caras: [
+    { id: 'anverso', label: 'Anverso (cara A)', pista: 'Foto, nombre y número' },
+    { id: 'reverso', label: 'Reverso (cara B)', pista: 'Domicilio y filiación' }
+  ] }
+```
+
+Con `caras`, el hueco ofrece un botón por cara más el de *documento completo*
+(un archivo con todo), y **subir una no pisa a la otra**: son varias filas del
+mismo `tipo`. La cara viaja en el nombre del objeto del bucket, no en una
+columna nueva. Gest-IA las lee **juntas** como un solo documento. Detalle en
+[`GEST-IA.md`](GEST-IA.md).
+
 ---
 
 ## Cómo añadir un trámite
