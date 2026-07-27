@@ -151,6 +151,10 @@
     dniComprador: { tipo: 'dni_comprador',       label: 'DNI / NIE del comprador',     obligatorio: true, caras: CARAS.dosCaras },
     permiso:      { tipo: 'permiso_circulacion', label: 'Permiso de circulación',      obligatorio: true, caras: CARAS.dosCaras },
     fichaTecnica: { tipo: 'ficha_tecnica',       label: 'Ficha técnica (ITV)',         obligatorio: true, caras: CARAS.dosPaginas },
+    /* Lo firma el interesado para que la gestoría actúe en su nombre. No
+       siempre está —hay trámites que se presentan sin él—, por eso es
+       opcional; cuando existe, entra en el expediente que ve el Colegio. */
+    mandato:      { tipo: 'mandato',             label: 'Mandato de representación',   obligatorio: false },
     otros:        { tipo: 'otros',               label: 'Otros documentos',            obligatorio: false }
   };
 
@@ -240,6 +244,10 @@
           tipo: 'factura_venta', label: 'Factura de venta (empresa vendedora)', obligatorio: true,
           si: (exp) => esVendedorEmpresa(exp)
         },
+        /* El orden de esta lista es el orden del expediente completo que se
+           presenta al Colegio: identidad, vehículo, negocio, representación
+           y por último lo demás. */
+        D.mandato,
         { tipo: 'itv', label: 'ITV en vigor', obligatorio: false },
         D.otros
       ]

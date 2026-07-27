@@ -196,6 +196,43 @@ plazo de 30 días, comunicación de venta, fuero) y espacios de firma. Se imprim
 o se guarda como PDF desde el navegador. Los campos que falten aparecen como
 huecos en blanco y se avisa en pantalla de cuáles son.
 
+### 8 · Expediente completo para el Colegio
+
+Un botón en la pestaña *Documentación* reúne **toda** la documentación en un solo
+documento y lo devuelve en **dos formatos**:
+
+| | Para qué | Cómo |
+|---|---|---|
+| **HTML** | el acceso de expedientes del Colegio | **autocontenido**: imágenes en base64 y PDF incrustados. Un archivo que se abre solo, sin depender de nada externo |
+| **PDF** | archivo y envío | mismo contenido y orden. Cada imagen es una página; los PDF aportados se anexan **página a página** con `pdf-lib`, conservando su texto |
+
+El orden es el del catálogo del trámite, que es el del expediente: portada con
+los datos y el índice, identidad del comprador, identidad del vendedor, permiso,
+ficha técnica, contrato o factura, mandato y lo demás.
+
+> ⚠️ **Pendiente del formato real del Colegio.** Esta es la primera versión: un
+> HTML limpio y autocontenido. Si el Colegio publica una estructura concreta
+> —es un formato de interoperabilidad, tiene que casar con lo que lee su
+> plataforma—, hay que replicarla. Se cambia en un solo sitio,
+> `construirHTML()` de `gestotrafic-expediente`.
+
+**Lo que falta consta como pendiente.** Un documento no aportado no genera página
+en blanco ni hueco disimulado: sale en el índice marcado *PENDIENTE*, y la
+portada dice con cuántos documentos se presenta el expediente. Antes de generar,
+la pantalla avisa de lo que falta, pero **no bloquea**: hay expedientes que se
+presentan incompletos a propósito.
+
+Se genera **en el servidor** (`gestotrafic-expediente`): los documentos viven en
+un bucket privado y se leen con el `service_role`. De vuelta solo llegan dos
+**enlaces firmados** que caducan en 1 hora, previa comprobación de que el
+expediente es de quien lo pide —el mismo criterio que el RLS—. Marcando *guardar
+copia* queda además registrada en el expediente, como constancia de lo enviado.
+
+El **Colegio** sale de `GT_COLEGIOS` en `config.js`, por la provincia de la
+gestoría. Solo lleva el nombre oficial: ni direcciones ni códigos inventados. Y
+una provincia sin entrada **no se rellena a ojo** — la portada dice *pendiente de
+configurar* y se ve.
+
 ---
 
 ## Arquitectura
@@ -210,7 +247,8 @@ assets/js/tramites.js               Catálogo de trámites
 assets/js/api.js                    Capa de datos Supabase
 assets/js/contrato.js               Generador del contrato
 assets/js/app.js                    Router y vistas
-supabase/functions/gestotrafic-auth Login y alta de gestores (bcrypt)
+supabase/functions/gestotrafic-auth       Login y alta de gestores (bcrypt)
+supabase/functions/gestotrafic-expediente Expediente completo (HTML + PDF)
 ```
 
 El orden de carga importa: `config.js` → `auth.js` → `api.js`. `api.js` necesita

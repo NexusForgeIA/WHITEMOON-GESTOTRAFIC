@@ -1989,6 +1989,24 @@
           </div>`;
         }).join('')}
 
+        ${(porTipo.expediente_completo || []).length ? `
+          <div class="form-sec" style="margin-top:20px">Copias generadas para el Colegio</div>
+          <p class="t-muted" style="font-size:.76rem;margin:0 0 10px">
+            Registro de lo que se ha enviado. No forman parte del checklist: son el expediente
+            entero empaquetado, no un documento aportado por el cliente.
+          </p>
+          ${porTipo.expediente_completo.map(d => `<div class="doc-row ok">
+            <div class="doc-ico">${svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>')}</div>
+            <div class="doc-info">
+              <strong>${h(d.nombre_archivo)}</strong>
+              <small>${h((d.mime || '').indexOf('pdf') !== -1 ? 'PDF' : 'HTML')} · ${KB(d.tamano)} · generado el ${fecha(d.created_at)}</small>
+            </div>
+            <div class="doc-actions">
+              ${enlaces[d.id] ? `<a class="btn btn-ghost btn-sm" href="${h(enlaces[d.id])}" target="_blank" rel="noopener">Ver</a>` : ''}
+              <button class="btn btn-danger btn-sm" data-del="${h(d.id)}">Quitar</button>
+            </div>
+          </div>`).join('')}` : ''}
+
         <p class="t-muted" style="font-size:.76rem;margin:14px 0 0">
           Formatos admitidos: foto o escaneo (JPG, PNG) y PDF · máximo 10 MB por archivo.
           El <b>DNI</b>, el permiso y la ficha técnica admiten <b>varias caras</b>: se leen juntas como
@@ -1996,7 +2014,11 @@
           <span class="t-mono">gestotrafic-docs</span>: cada enlace se firma al abrirlo y caduca en
           1 hora. Solo el gestor del expediente (o un administrador) puede firmarlo.
         </p>
-      </div>`;
+      </div>
+
+      ${htmlExpedienteCompleto(tr, exp, aplicables, porTipo)}`;
+
+    activarExpedienteCompleto(exp, tr, aplicables, cont);
 
     cont.querySelectorAll('input[type="file"]').forEach(inp => {
       inp.addEventListener('change', async () => {
@@ -2030,6 +2052,153 @@
           panelDocs(exp, tr, docs, cont);
         } catch (err) { toast(err.message, 'err'); b.disabled = false; }
       });
+    });
+  }
+
+  /* ---------- Expediente completo · HTML para el Colegio + PDF ---------- */
+
+  /** Entrega un blob como archivo descargado, con su nombre y su tipo. */
+  function descargarBlob(blob, nombre) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = nombre;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+
+  /* Los documentos van en el ORDEN del catálogo, que es el del expediente que
+     se presenta: identidad, vehículo, negocio, representación y lo demás. Ese
+     orden se envía a la Edge Function tal cual, para no tener dos listas que
+     mantener sincronizadas. */
+  const seccionesDe = (tr, exp) => T.docsDe(tr, exp)
+    .filter(d => d.tipo !== 'expediente_completo')
+    .map(d => ({ tipo: d.tipo, label: d.label, obligatorio: !!d.obligatorio }));
+
+  function htmlExpedienteCompleto(tr, exp, aplicables, porTipo) {
+    const secciones = aplicables.filter(d => d.tipo !== 'expediente_completo');
+    const faltan = secciones.filter(d => !(porTipo[d.tipo] || []).length);
+    const faltanObl = faltan.filter(d => d.obligatorio);
+    const colegio = window.GT_COLEGIO();
+
+    return `
+      <div class="card" style="max-width:860px;margin-top:16px">
+        <div class="card-t">Expediente completo para el Colegio</div>
+        <p class="t-muted" style="font-size:.79rem;margin:0 0 14px">
+          Reúne toda la documentación en <b>un solo documento</b>, en el orden del trámite:
+          portada con los datos del expediente e índice, y detrás cada documento aportado.
+          Sale en <b>HTML</b> —autocontenido, para el acceso de expedientes del Colegio— y en
+          <b>PDF</b> para archivo o envío.
+        </p>
+
+        <div class="empresa-note" style="margin-bottom:14px">
+          ${svg('<path d="M3 21h18M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/>')}
+          <div>${colegio.nombre
+            ? `Irá a nombre de <b>${h(colegio.nombre)}</b>${window.GT_CONFIG.GESTORIA.num_colegiado
+                ? ' · colegiado nº ' + h(window.GT_CONFIG.GESTORIA.num_colegiado) : ''}.`
+            : `<b>No hay Colegio configurado para ${h(colegio.provincia || 'esta provincia')}.</b>
+               La portada lo dirá tal cual en vez de poner uno cualquiera: complétalo en
+               <span class="t-mono">GT_COLEGIOS</span> (assets/js/config.js).`}</div>
+        </div>
+
+        ${faltan.length ? `<div class="regul-note" style="margin-bottom:14px">
+          ${svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>')}
+          <div>Faltan ${faltan.length} documento${faltan.length === 1 ? '' : 's'}${faltanObl.length
+            ? `, ${faltanObl.length} de ellos <b>obligatorio${faltanObl.length === 1 ? '' : 's'}</b>` : ''}:
+            <b>${h(faltan.map(d => d.label).join(', '))}</b>.
+            Se puede generar igual — constan como <b>pendientes</b> en el índice y no se inventa
+            ninguna página por ellos.</div>
+        </div>` : ''}
+
+        <label class="flex" style="font-size:.8rem;color:var(--muted);margin-bottom:14px;cursor:pointer">
+          <input type="checkbox" id="chk-guardar-exp" style="width:auto" checked>
+          Guardar una copia en el expediente (queda registro de lo que se envió)
+        </label>
+
+        <div class="row-actions">
+          <button class="btn" id="btn-exp-completo">Generar expediente completo</button>
+        </div>
+
+        <div id="exp-completo-salida"></div>
+
+        <p class="t-muted" style="font-size:.76rem;margin:14px 0 0">
+          Se genera <b>en el servidor</b>: los documentos se leen del bucket privado con la clave de
+          servicio y de vuelta solo llegan dos enlaces firmados que caducan en 1 hora. El navegador
+          nunca ve una clave ni una URL de cada archivo suelto.
+        </p>
+      </div>`;
+  }
+
+  function activarExpedienteCompleto(exp, tr, aplicables, cont) {
+    const btn = cont.querySelector('#btn-exp-completo');
+    if (!btn) return;
+    const salida = cont.querySelector('#exp-completo-salida');
+
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Reuniendo la documentación…';
+      salida.innerHTML = '';
+
+      try {
+        const r = await GTApi.generarExpediente(exp.id, {
+          tramite: tr.nombre,
+          secciones: seccionesDe(tr, exp),
+          gestoria: window.GT_CONFIG.GESTORIA,
+          colegio: window.GT_COLEGIO(),
+          guardar: !!cont.querySelector('#chk-guardar-exp').checked
+        });
+
+        const kb = (n) => Math.round((n || 0) / 1024) + ' KB';
+        salida.innerHTML = `
+          <div class="doc-row ok" style="margin-top:14px">
+            <div class="doc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+            <div class="doc-info">
+              <strong>Expediente completo generado</strong>
+              <small>${r.incluidos.length} documento${r.incluidos.length === 1 ? '' : 's'} incluido${r.incluidos.length === 1 ? '' : 's'}${r.faltan.length ? ` · ${r.faltan.length} pendiente${r.faltan.length === 1 ? '' : 's'} en el índice` : ''}${r.guardado ? ' · copia guardada en el expediente' : ''}</small>
+            </div>
+            <div class="doc-actions">
+              ${r.html.url ? `<button class="btn btn-sm" data-bajar="${h(r.html.url)}"
+                data-mime="text/html;charset=utf-8" data-nombre="expediente-${h(r.referencia)}.html">HTML · ${kb(r.html.bytes)}</button>` : ''}
+              ${r.pdf.url ? `<button class="btn btn-sm" data-bajar="${h(r.pdf.url)}"
+                data-mime="application/pdf" data-nombre="expediente-${h(r.referencia)}.pdf">PDF · ${kb(r.pdf.bytes)}</button>` : ''}
+            </div>
+          </div>
+          <p class="t-muted" style="font-size:.74rem;margin:8px 0 0">
+            Los dos enlaces caducan en 1 hora. Vuelve a generarlo cuando lo necesites.
+          </p>`;
+
+        /* El enlace firmado se sirve como `text/plain` —Storage no devuelve
+           HTML ejecutable desde su dominio, y hace bien—, así que abrirlo
+           directamente enseñaría el código fuente. Se baja el archivo y se
+           entrega como fichero con su tipo real: el que se sube al Colegio. */
+        salida.querySelectorAll('[data-bajar]').forEach(b => {
+          b.addEventListener('click', async () => {
+            const txt = b.textContent;
+            b.disabled = true; b.innerHTML = '<span class="spinner"></span>';
+            try {
+              const res = await fetch(b.dataset.bajar);
+              if (!res.ok) throw new Error('El enlace ha caducado. Vuelve a generarlo.');
+              descargarBlob(new Blob([await res.arrayBuffer()], { type: b.dataset.mime }), b.dataset.nombre);
+            } catch (e) {
+              toast(e.message || 'No se pudo descargar', 'err');
+            }
+            b.disabled = false; b.textContent = txt;
+          });
+        });
+
+        toast('Expediente completo generado', 'ok');
+        if (r.guardado) {
+          const nuevos = await GTApi.listarDocumentos(exp.id);
+          salida.insertAdjacentHTML('beforeend',
+            `<p class="t-muted" style="font-size:.74rem;margin:4px 0 0">Copia registrada · ${nuevos.length} documentos en el expediente.</p>`);
+        }
+      } catch (err) {
+        toast(err.message || 'No se pudo generar', 'err');
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'Generar expediente completo';
     });
   }
 

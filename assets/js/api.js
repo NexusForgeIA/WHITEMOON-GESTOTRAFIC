@@ -395,6 +395,31 @@
     return { path: path, nombre: file.name, mime: file.type || null, tamano: file.size };
   }
 
+  /* ---------------- Expediente completo (Colegio) ---------------- */
+
+  /**
+   * Genera la documentación del expediente junta, en HTML y en PDF.
+   *
+   * Va por Edge Function porque los documentos viven en un bucket PRIVADO:
+   * allí se bajan con el service_role y de vuelta solo llegan dos enlaces
+   * firmados que caducan. El navegador no ve ninguna clave ni una URL por
+   * archivo suelto.
+   */
+  async function generarExpediente(expedienteId, datos) {
+    var res = await fetch(C.SUPABASE_URL + '/functions/v1/' + C.FN_EXPEDIENTE, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': C.SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + (global.GTAuth.getToken() || '')
+      },
+      body: JSON.stringify(Object.assign({ expediente_id: expedienteId }, datos))
+    });
+    var data = await res.json().catch(function () { return {}; });
+    if (!res.ok || data.error) throw new Error(data.error || 'No se pudo generar el expediente completo');
+    return data;
+  }
+
   /** Registra en el checklist un archivo ya subido. */
   async function registrarDocumento(expedienteId, tipo, archivo) {
     return unwrap(await sb.from(C.TABLA_DOCUMENTOS).insert({
@@ -471,6 +496,7 @@
     preciosModelos: preciosModelos,
     preciosVersiones: preciosVersiones,
     analizarDocumentos: analizarDocumentos,
+    generarExpediente: generarExpediente,
     subirArchivo: subirArchivo,
     registrarDocumento: registrarDocumento,
     kpis: kpis
