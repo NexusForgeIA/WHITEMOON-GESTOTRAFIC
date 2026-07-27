@@ -143,7 +143,7 @@ paso "4/6 · Desplegando las Edge Functions"
 
 # gestotrafic-itp y gestotrafic-auth van sin verify_jwt: la primera es una
 # calculadora sin datos personales y la segunda es el propio login, que aún
-# no tiene sesión que verificar. Las otras dos SÍ la exigen.
+# no tiene sesión que verificar. Las demás SÍ la exigen.
 desplegar() {
   local nombre="$1" verifica="$2"
   [ -f "$FUNCIONES/$nombre/index.ts" ] || morir "Falta el código de $nombre"
@@ -159,6 +159,7 @@ desplegar gestotrafic-auth       no
 desplegar gestotrafic-itp        no
 desplegar gestia-extraer         si
 desplegar gestotrafic-valor-base si
+desplegar gestotrafic-expediente si
 
 # ------------------------------------------------------------
 # 5 · Secretos

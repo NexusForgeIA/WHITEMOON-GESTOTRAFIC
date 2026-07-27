@@ -105,6 +105,14 @@ mismo `tipo`. La cara viaja en el nombre del objeto del bucket, no en una
 columna nueva. Gest-IA las lee **juntas** como un solo documento. Detalle en
 [`GEST-IA.md`](GEST-IA.md).
 
+### El orden de `docs` es el orden del expediente
+
+La lista `docs` no es solo un checklist: es el **orden en que se monta el
+expediente completo** que se presenta al Colegio (identidad, vehículo, negocio,
+representación y lo demás). `gestotrafic-expediente` la recibe tal cual y no
+reordena nada, así que colocar bien un documento nuevo en la lista es todo lo
+que hay que hacer para que salga en su sitio en el HTML y en el PDF.
+
 ---
 
 ## Cómo añadir un trámite

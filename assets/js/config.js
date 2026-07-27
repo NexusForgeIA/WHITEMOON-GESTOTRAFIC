@@ -31,11 +31,39 @@ window.GT_CONFIG = {
      servidor y las ~71.000 filas no tienen por qué bajar al navegador. */
   FN_VALOR_BASE: 'gestotrafic-valor-base',
 
+  /* Genera el expediente completo (HTML para el Colegio + PDF) leyendo el
+     bucket privado con el service_role. */
+  FN_EXPEDIENTE: 'gestotrafic-expediente',
+
   // Datos de la gestoría que aparecen en el contrato generado
   GESTORIA: {
     nombre: 'GestoTrafic · Gestoría de Tráfico',
-    ciudad: 'Majadahonda, Madrid'
+    ciudad: 'Majadahonda, Madrid',
+    provincia: 'Madrid',
+    /* Número de colegiado de la gestoría. Se imprime en la portada del
+       expediente completo; vacío, no se imprime. NO se inventa. */
+    num_colegiado: ''
   }
+};
+
+/* --- Colegios de Gestores Administrativos ---------------------------------
+   La portada del expediente completo lleva el Colegio de la provincia de la
+   gestoría (`GESTORIA.provincia`). Aquí solo va el NOMBRE oficial, que es
+   público; la dirección, el CIF o el código de colegiado NO se rellenan a
+   ojo: si hacen falta, los aporta la gestoría.
+
+   Al instalar en una gestoría nueva: añade su provincia con el nombre de su
+   Colegio y ajusta `GESTORIA.provincia`. Una provincia sin entrada NO se
+   inventa — la portada dice "pendiente de configurar" y se ve. */
+window.GT_COLEGIOS = {
+  'Madrid': { nombre: 'Ilustre Colegio Oficial de Gestores Administrativos de Madrid' }
+};
+
+/** Colegio de la provincia configurada, o null si no está declarado. */
+window.GT_COLEGIO = function () {
+  var p = window.GT_CONFIG.GESTORIA.provincia;
+  var c = window.GT_COLEGIOS[p];
+  return c ? { provincia: p, nombre: c.nombre } : { provincia: p, nombre: null };
 };
 
 /* --- Catálogos --- */

@@ -1,6 +1,6 @@
 # Edge Functions · dónde está el código
 
-**Aquí no hay copias.** El código de las cuatro funciones vive en un solo sitio:
+**Aquí no hay copias.** El código de las cinco funciones vive en un solo sitio:
 
 ```
 supabase/functions/
@@ -8,6 +8,7 @@ supabase/functions/
   gestotrafic-itp/index.ts           motor fiscal (Anexo IV + tipos autonómicos)
   gestotrafic-valor-base/index.ts    propone el valor base del Anexo I a Gest-IA
   gestia-extraer/index.ts            lectura de documentos con Claude
+  gestotrafic-expediente/index.ts    expediente completo para el Colegio (HTML + PDF)
 ```
 
 `provision.sh` despliega desde ahí.
@@ -15,7 +16,7 @@ supabase/functions/
 ## Por qué no se duplican aquí
 
 Tener dos copias del mismo fichero es tener dos ficheros que **se
-desincronizan**. Y una de estas cuatro es `gestotrafic-itp`, que lleva la tabla
+desincronizan**. Y una de estas cinco es `gestotrafic-itp`, que lleva la tabla
 de depreciación del Anexo IV y los tipos de las 19 comunidades: si una copia se
 queda atrás, la instalación de un cliente liquida impuestos con cifras viejas y
 no lo detecta nadie, porque el resultado sigue *pareciendo* correcto.
@@ -34,9 +35,10 @@ valor equivocado abre o rompe el acceso:
 | `gestotrafic-itp` | **off** | Calculadora pura, sin datos personales ni acceso a expedientes |
 | `gestia-extraer` | **on** | Lee documentos del bucket privado; además comprueba el usuario y la propiedad del expediente |
 | `gestotrafic-valor-base` | **on** | Consulta las tablas de precios; además comprueba que el usuario existe y está activo |
+| `gestotrafic-expediente` | **on** | Lee TODOS los documentos del expediente del bucket privado y firma los enlaces del resultado; comprueba usuario y propiedad |
 
 Que `verify_jwt` esté en `on` **no basta**: la clave anon también es un token
-válido del proyecto. Por eso las dos funciones sensibles vuelven a identificar al
+válido del proyecto. Por eso las funciones sensibles vuelven a identificar al
 usuario contra `gestotrafic_usuarios` antes de hacer nada.
 
 ## Variables de entorno
