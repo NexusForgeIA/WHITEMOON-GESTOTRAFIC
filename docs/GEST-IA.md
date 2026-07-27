@@ -51,9 +51,9 @@ subieron y el gestor lo completa a mano. Se avisa en pantalla con su referencia.
 
 | Documento | Campos |
 |---|---|
-| DNI / NIE | nombre, apellidos, número, domicilio |
-| CIF / empresa | razón social, CIF, domicilio social |
-| Ficha técnica | marca, modelo, bastidor, matrícula, 1ª matriculación, combustible, CVf |
+| DNI / NIE | nombre, apellidos, número, domicilio, **provincia** |
+| CIF / empresa | razón social, CIF, domicilio social, **provincia** |
+| Ficha técnica | marca, modelo, bastidor, matrícula, 1ª matriculación, combustible, CVf, cilindrada, **clasificación** |
 | Permiso de circulación | titular, matrícula |
 | Contrato / factura | precio, fecha, vendedor, comprador |
 
@@ -119,21 +119,67 @@ Con el vendedor en empresa, la pestaña de ITP avisa de que una venta con factur
 sujeta a IVA suele quedar **exenta**. El aviso es solo eso: la exención la marca
 el gestor con su toggle, nunca Gest-IA.
 
-### 3 · El ITP
+### 3 · El ITP · propuesto entero
 
-Se calcula con el motor real `gestotrafic-itp` en cuanto el gestor confirma el
-valor base. Hacen falta dos datos que **no están en ningún documento**:
+Con los documentos subidos y legibles, Gest-IA **propone el ITP completo y lo
+calcula sola**. Los tres datos que antes ponía el gestor a mano salen ahora de
+los papeles:
 
-- **valor BOE (Anexo I)** — Gest-IA lo **propone** desde la tabla de precios
-  medios; la versión la confirma el gestor
-- **CCAA del comprador** — es una decisión, no un dato del papel: la elige el
-  gestor en la pantalla de subida
+| Dato | De dónde sale | Si no se lee |
+|---|---|---|
+| **Tipo de vehículo** | campo *clasificación* de la ficha técnica | en blanco; lo elige el gestor |
+| **CCAA** | provincia del domicilio del **comprador**, en el reverso de su DNI | en blanco; la elige el gestor |
+| **Valor base** | tabla del Anexo I, filtrada con lo leído de la ficha | en blanco; se pone a mano |
 
-También se pide ahí el **tipo de vehículo**, porque decide en qué tabla del
-Anexo I se busca (y con qué tabla del Anexo IV se deprecia). No se deduce del
-documento.
+El expediente queda en **pendiente de validación** con el ITP calculado y cada
+campo marcado como propuesta, con su confianza y su origen. El gestor revisa y
+valida; no teclea.
 
-El precio de contrato y la fecha de matriculación sí salen de los documentos.
+**Por qué la CCAA sale del comprador y no del vendedor**: el ITP lo liquida
+quien compra, en su comunidad. Con vendedor en Barcelona y comprador en Madrid,
+la CCAA es Madrid.
+
+**Traducir provincia a comunidad es geografía, no fiscalidad** — o la provincia
+está en la tabla `GT_PROVINCIAS` o no está. Lo que no se hace es deducir la
+provincia de la calle, del municipio o del código postal: eso sería justo el
+tipo de dato plausible que esta casa no genera. Y en el reverso del DNI conviven
+la provincia de nacimiento y la del domicilio, así que al modelo se le pide
+explícitamente la **del domicilio** y que devuelva `null` si no las distingue.
+
+Con la clasificación pasa igual: `TURISMO`, `MOTOCICLETA` o `AUTOCARAVANA` se
+traducen; un `VEHÍCULO MIXTO ADAPTABLE` **no se acerca al tipo más parecido**,
+porque turismo y autocaravana se deprecian con tablas distintas y acercarse
+cambia el impuesto.
+
+#### Lo que no calcula, lo dice
+
+Si falta alguna de las tres piezas, **no se calcula nada**: el banner del
+expediente dice exactamente cuál falta y dónde completarla. Nunca un cálculo a
+medias ni un valor por defecto silencioso — antes se asumía «turismo» y
+«Comunidad de Madrid» sin decirlo, y eso es un dato fiscal inventado con buena
+presencia.
+
+Lo que sí se conserva es lo que se pudo averiguar: si el valor base se encontró
+pero falta la CCAA, el valor base **se queda puesto** y el gestor solo completa
+lo que falta.
+
+#### Varias versiones: aquí no elige
+
+Si encajan **varias versiones del modelo con precios distintos**, Gest-IA no
+elige ninguna y lleva al gestor a fijarla, con todo lo demás ya propuesto. Es la
+regla de la casa: entre dos versiones del mismo modelo puede haber mil euros, y
+acertar por sorteo no es acertar.
+
+### 4 · El motor del ITP
+
+El cálculo lo hace el motor real `gestotrafic-itp`, el mismo que usa el panel
+del expediente: Gest-IA propone los datos de entrada, no reimplementa el
+impuesto.
+
+El **valor BOE** no está en ningún documento —sale de la tabla de precios medios
+del Anexo I—, y el **tipo de vehículo** decide en qué tabla se busca y con cuál
+del Anexo IV se deprecia. El precio de contrato y la fecha de matriculación sí
+salen de los papeles.
 
 #### Cómo se propone el valor base
 
@@ -190,7 +236,7 @@ ciegas entre esos tres precios sería inventar el valor base.
 Si ninguna versión se parece lo suficiente, o si las dos mejores empatan, no se
 propone ninguna: se avisa en ámbar y se pide selección manual.
 
-### 4 · La validación es obligatoria
+### 5 · La validación es obligatoria
 
 Mientras `ia_estado = 'pendiente_validacion'`:
 

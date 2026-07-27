@@ -54,6 +54,35 @@
 
   const RANGO = { alta: 3, media: 2, baja: 1 };
 
+  /* Campos que el expediente guarda en `datos` pero que no están en el
+     formulario del trámite. Sin esta lista, `proponer` los descartaría por no
+     encontrarlos en el catálogo. */
+  const EXTRA = ['fecha_venta', 'tipo_vehiculo'];
+
+  /* Clasificación de la ficha técnica → tipo de vehículo del Anexo I.
+     Solo lo que se reconoce sin dudar. Un "VEHÍCULO MIXTO ADAPTABLE" o una
+     furgoneta no están en el Anexo I con estos tipos, así que devuelve null y
+     lo elige el gestor: acercarse al tipo equivocado cambia la tabla de
+     depreciación y, con ella, el impuesto. */
+  const CLASIFICACION = [
+    [/AUTOCARAVANA|VIVIENDA|CAMPER/, 'autocaravana'],
+    [/QUAD|CUATRICICLO/,             'quad'],
+    [/BUGGY/,                        'buggy'],
+    [/MOTOCICLETA|CICLOMOTOR|\bMOTO\b/, 'moto'],
+    [/TURISMO/,                      'coche']
+  ];
+
+  /** Tipo de vehículo del CRM a partir de la clasificación de la ficha. */
+  function tipoVehiculo(clasificacion, combustibleLeido) {
+    if (!clasificacion) return null;
+    const c = String(clasificacion).normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
+    const par = CLASIFICACION.find(([re]) => re.test(c));
+    if (!par) return null;
+    // Una moto eléctrica tarifa por kW y no por cilindrada: es otra tabla.
+    if (par[1] === 'moto' && /el[eé]ctric/i.test(String(combustibleLeido || ''))) return 'moto_electrica';
+    return par[1];
+  }
+
   /** De `dni_comprador` saca `comprador`. */
   function parteDe(tipo) {
     const m = /^(?:dni|cif)_(.+)$/.exec(tipo);
@@ -91,8 +120,9 @@
 
     const proponer = (campo, valor, conf, origen, nota) => {
       if (!campo) return;
-      // Solo campos que este trámite tiene realmente.
-      if (campos.indexOf(campo) === -1 && campo !== 'fecha_venta') return;
+      // Solo campos que este trámite tiene realmente, más los que vive el
+      // expediente sin estar en el formulario (ver EXTRA).
+      if (campos.indexOf(campo) === -1 && EXTRA.indexOf(campo) === -1) return;
 
       const previo = out[campo];
       const hayValor = valor !== null && valor !== undefined && valor !== '';
@@ -159,6 +189,43 @@
     }
     if (hay('cif_comprador')) {
       marcarEmpresa('comprador', 'Se ha aportado el CIF de la empresa compradora.');
+    }
+
+    /* --- Los dos datos que antes ponía el gestor a mano ---
+       Se proponen igual que el resto: con su confianza y su origen, y en
+       blanco si no se leen. Que estén aquí no los convierte en confirmados;
+       los valida el gestor como todo lo demás. */
+
+    // 1 · Tipo de vehículo: sale de la clasificación de la ficha técnica.
+    const ficha = (lecturas || []).find(d => d.extraido && d.perfil === 'ficha_tecnica');
+    if (ficha && ficha.campos) {
+      const cl = ficha.campos.clasificacion || {};
+      const tipo = tipoVehiculo(cl.valor, (ficha.campos.combustible || {}).valor);
+      if (tipo) {
+        proponer('tipo_vehiculo', tipo, cl.confianza || 'media', ficha.tipo,
+          'Clasificación de la ficha técnica: «' + cl.valor + '».');
+      } else if (cl.valor) {
+        proponer('tipo_vehiculo', null, 'baja', ficha.tipo,
+          'La ficha dice «' + cl.valor + '», que no encaja con ningún tipo del Anexo I: elígelo tú.');
+      }
+    }
+
+    /* 2 · CCAA: la del domicilio del COMPRADOR, que es quien liquida el ITP.
+       Sale del reverso de su DNI (o del domicilio social si compra una
+       empresa). Si la provincia no se lee o no se reconoce, queda en blanco:
+       la CCAA cambia el tipo impositivo y una equivocada sale cara. */
+    const idComprador = (lecturas || []).find(d =>
+      d.extraido && (d.tipo === 'dni_comprador' || d.tipo === 'cif_comprador'));
+    if (idComprador && idComprador.campos && campos.indexOf('ccaa') !== -1) {
+      const pr = idComprador.campos.provincia || {};
+      const ccaa = global.GT_CCAA_DE_PROVINCIA ? global.GT_CCAA_DE_PROVINCIA(pr.valor) : null;
+      if (ccaa) {
+        proponer('ccaa', ccaa, pr.confianza || 'media', idComprador.tipo,
+          'Residencia del comprador: ' + pr.valor + '.');
+      } else if (pr.valor) {
+        proponer('ccaa', null, 'baja', idComprador.tipo,
+          '«' + pr.valor + '» no es una provincia reconocida: elige la CCAA tú.');
+      }
     }
 
     return out;

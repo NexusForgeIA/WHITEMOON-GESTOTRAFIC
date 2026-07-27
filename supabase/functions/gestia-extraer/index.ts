@@ -75,7 +75,11 @@ const PERFILES: Record<string, {
       nombre:    { etiqueta: 'Nombre de pila',   pista: 'Solo el nombre, sin apellidos. Está en el anverso.' },
       apellidos: { etiqueta: 'Apellidos',        pista: 'Los dos apellidos, en su orden. Están en el anverso.' },
       numero:    { etiqueta: 'Número de DNI/NIE', pista: '8 dígitos + letra (DNI) o X/Y/Z + 7 dígitos + letra (NIE). Copia la letra tal cual aparece. Está en el anverso.' },
-      direccion: { etiqueta: 'Domicilio',        pista: 'Está en el REVERSO. Si no tienes el reverso a la vista, devuelve null: no lo deduzcas de ningún otro documento.' }
+      direccion: { etiqueta: 'Domicilio',        pista: 'Está en el REVERSO. Si no tienes el reverso a la vista, devuelve null: no lo deduzcas de ningún otro documento.' },
+      /* De aquí sale la CCAA con la que se liquida el ITP, así que la
+         confusión clásica del reverso —provincia de nacimiento vs. provincia
+         del domicilio— cambiaría el impuesto. Ante la duda, null. */
+      provincia: { etiqueta: 'Provincia del domicilio', pista: 'La provincia del DOMICILIO actual, no la de nacimiento: en el reverso aparecen las dos y se confunden con facilidad. Solo el nombre de la provincia. Si no distingues cuál es cuál, devuelve null.' }
     }
   },
   cif: {
@@ -83,7 +87,9 @@ const PERFILES: Record<string, {
     campos: {
       razon_social: { etiqueta: 'Razón social', pista: 'Nombre completo con su forma jurídica (S.L., S.A., …).' },
       cif:          { etiqueta: 'CIF',          pista: 'Letra + 8 caracteres. No lo confundas con un número de factura.' },
-      domicilio:    { etiqueta: 'Domicilio social', pista: 'Dirección fiscal completa.' }
+      domicilio:    { etiqueta: 'Domicilio social', pista: 'Dirección fiscal completa.' },
+      // Misma función que en el DNI: de aquí sale la CCAA que liquida el ITP.
+      provincia:    { etiqueta: 'Provincia del domicilio social', pista: 'Solo el nombre de la provincia del domicilio fiscal. Si no aparece, devuelve null: no la deduzcas del código postal ni del prefijo del teléfono.' }
     }
   },
   ficha_tecnica: {
@@ -96,7 +102,13 @@ const PERFILES: Record<string, {
       fecha_matriculacion: { etiqueta: '1ª matriculación', pista: 'Campo B. Devuélvela en formato AAAA-MM-DD.' },
       combustible:         { etiqueta: 'Combustible',      pista: 'Campo P.3. Normaliza a: Gasolina, Diésel, Híbrido, Híbrido enchufable, Eléctrico, GLP o GNC.' },
       cvf:                 { etiqueta: 'Potencia fiscal',  pista: 'Campo 7 o "CVF". Número con decimales, p. ej. 11,5. Devuelve el número con punto decimal.' },
-      cilindrada:          { etiqueta: 'Cilindrada',       pista: 'Campo P.1, en c.c. Solo el número entero. En un vehículo eléctrico no existe: devuelve null.' }
+      cilindrada:          { etiqueta: 'Cilindrada',       pista: 'Campo P.1, en c.c. Solo el número entero. En un vehículo eléctrico no existe: devuelve null.' },
+      /* De esto sale en qué tabla del Anexo I se busca el precio medio, y
+         turismo y autocaravana se deprecian con tablas distintas. Se copia lo
+         que ponga el documento; traducirlo a los tipos del CRM es cosa del
+         cliente, que ante una clasificación que no encaje deja que elija el
+         gestor en vez de acercarse. */
+      clasificacion:       { etiqueta: 'Clasificación',    pista: 'Campo J o "CLASIFICACIÓN": TURISMO, MOTOCICLETA, CICLOMOTOR, AUTOCARAVANA, VEHÍCULO MIXTO… Cópiala literal, sin interpretarla. Si no aparece, devuelve null: no la deduzcas de la marca ni del modelo.' }
     }
   },
   permiso: {
@@ -145,8 +157,8 @@ const nulable = (t: string) => ({ anyOf: [{ type: t }, { type: 'null' }] });
    Nullable se queda solo donde significa algo: `valor: null` es "esto no lo he
    leído con claridad", que es la pieza central de la regla anti-invención. La
    nota y la observación pasan a cadena, vacía cuando no hay nada que decir:
-   son texto de apoyo y la diferencia entre "" y null no aporta. Así son 8
-   uniones y quedan campos de sobra para crecer. */
+   son texto de apoyo y la diferencia entre "" y null no aporta. Así la ficha
+   —ahora 9 campos— gasta 9 uniones y quedan de sobra para crecer. */
 function esquema(perfil: string) {
   const p = PERFILES[perfil];
   const campos = p.campos;
