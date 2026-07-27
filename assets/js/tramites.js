@@ -28,7 +28,8 @@
      soloSi· { campo, valor } → el campo solo se muestra si otro campo
              del formulario tiene ese valor (visibilidad condicional)
      autoSi· 'empresa' → en ese modo lo rellena la aplicación (solo lectura)
-     lSi   · etiqueta alternativa mientras el campo está en modo autoSi
+     lSi   · etiqueta alternativa cuando la parte del campo (vendedor_tipo,
+             comprador_tipo…) vale 'empresa': "DNI / NIF" pasa a "CIF"
 
    Cada DOCUMENTO declara:
      tipo, label, obligatorio y opcionalmente `si`: función que
@@ -63,12 +64,19 @@
   /* Vendedor de una TRANSFERENCIA: puede ser particular o empresa.
      Si es empresa, el gestor elige la empresa vendedora del listado de
      clientes del CRM y los tres campos de identidad se vuelcan solos. */
+  /* Partes de una operación que pueden firmar como particular o como
+     empresa. Cada una se declara con un campo `<parte>_tipo` y lleva
+     asociados los documentos `dni_<parte>` y `cif_<parte>`. */
+  const PARTES = ['vendedor', 'comprador'];
+
+  const opTipoParte = [
+    { v: 'particular', l: 'Particular' },
+    { v: 'empresa',    l: 'Empresa / concesionario' }
+  ];
+
   const vendedorTipo = {
     n: 'vendedor_tipo', l: '¿Quién vende el vehículo?', t: 'select', full: 1, def: 'particular',
-    op: [
-      { v: 'particular', l: 'Particular' },
-      { v: 'empresa',    l: 'Empresa / concesionario' }
-    ]
+    op: opTipoParte
   };
 
   const vendedorEmpresaSel = {
@@ -91,6 +99,23 @@
     { n: 'comprador_nombre',    l: 'Nombre y apellidos', t: 'text', col: 1, ph: 'María García López' },
     { n: 'comprador_nif',       l: 'DNI / NIF',          t: 'text', col: 1, ph: '12345678Z' },
     { n: 'comprador_direccion', l: 'Domicilio',          t: 'text', col: 1, ph: 'Calle Mieses 1, Majadahonda' },
+    { n: 'comprador_telefono',  l: 'Teléfono',           t: 'text', col: 1, ph: '600 333 444' }
+  ];
+
+  /* El comprador de una transferencia también puede ser una empresa (un
+     concesionario que compra para stock). No hay volcado desde el CRM como
+     en el vendedor —se escribe o se copia del cliente—, pero el tipo sí
+     decide la etiqueta de los campos y qué documento pide el checklist. */
+  const compradorTipo = {
+    n: 'comprador_tipo', l: '¿Quién compra el vehículo?', t: 'select', full: 1, def: 'particular',
+    op: opTipoParte
+  };
+
+  const compradorTransferencia = [
+    compradorTipo,
+    { n: 'comprador_nombre',    l: 'Nombre y apellidos', t: 'text', col: 1, ph: 'María García López',        lSi: 'Razón social' },
+    { n: 'comprador_nif',       l: 'DNI / NIF',          t: 'text', col: 1, ph: '12345678Z',                 lSi: 'CIF' },
+    { n: 'comprador_direccion', l: 'Domicilio',          t: 'text', col: 1, ph: 'Calle Mieses 1, Majadahonda', lSi: 'Domicilio social' },
     { n: 'comprador_telefono',  l: 'Teléfono',           t: 'text', col: 1, ph: '600 333 444' }
   ];
 
@@ -148,7 +173,7 @@
           ]
         },
         { t: 'Vendedor', campos: vendedorTransferencia },
-        { t: 'Comprador', campos: comprador, copiarCliente: true },
+        { t: 'Comprador', campos: compradorTransferencia, copiarCliente: true },
         {
           t: 'Fiscalidad',
           campos: [
@@ -159,7 +184,17 @@
         }
       ],
       docs: [
-        D.dniComprador,
+        /* Una persona se identifica con su DNI/NIE; una empresa, con su CIF.
+           Pedir el documento que no es deja el expediente sin la identidad
+           fiscal correcta de esa parte. */
+        {
+          tipo: 'dni_comprador', label: 'DNI / NIE del comprador', obligatorio: true,
+          si: (exp) => !esCompradorEmpresa(exp)
+        },
+        {
+          tipo: 'cif_comprador', label: 'CIF de la empresa compradora', obligatorio: true,
+          si: (exp) => esCompradorEmpresa(exp)
+        },
         {
           tipo: 'dni_vendedor', label: 'DNI / NIE del vendedor', obligatorio: true,
           si: (exp) => !esVendedorEmpresa(exp)
@@ -386,6 +421,11 @@
     return leer(exp, 'vendedor_tipo') === 'empresa';
   }
 
+  /** ¿Y el comprador? */
+  function esCompradorEmpresa(exp) {
+    return leer(exp, 'comprador_tipo') === 'empresa';
+  }
+
   /** ¿El gestor ha confirmado que la operación está exenta de ITP? */
   function esExentoITP(exp) {
     return leer(exp, 'itp_exento') === true;
@@ -396,6 +436,12 @@
     if (!exp) return null;
     if (exp[nombre] !== undefined && exp[nombre] !== null) return exp[nombre];
     return (exp.datos && exp.datos[nombre] !== undefined) ? exp.datos[nombre] : null;
+  }
+
+  /** Campos '<parte>_tipo' que declara el trámite, en orden. Son los que
+      deciden si esa parte firma como particular o como empresa. */
+  function camposTipoParte(t) {
+    return campos(t).filter(c => PARTES.indexOf(c.n.replace(/_tipo$/, '')) !== -1 && /_tipo$/.test(c.n));
   }
 
   /** Todos los campos de un trámite, en orden. */
@@ -420,12 +466,15 @@
 
   global.GT_TRAMITES = TRAMITES;
   global.GTTramites = {
+    PARTES: PARTES,
     tramite: tramite,
     leer: leer,
     campos: campos,
+    camposTipoParte: camposTipoParte,
     docsDe: docsDe,
     etiquetaOpcion: etiquetaOpcion,
     esVendedorEmpresa: esVendedorEmpresa,
+    esCompradorEmpresa: esCompradorEmpresa,
     esExentoITP: esExentoITP
   };
 })(window);

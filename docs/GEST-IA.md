@@ -64,6 +64,27 @@ suben igual y quedan en el checklist.
 Si dos documentos aportan el mismo campo, gana el de **más confianza**; a
 igualdad, el primero. **Un `null` nunca pisa un valor leído.**
 
+#### Quién es empresa se pregunta, no se adivina
+
+El checklist de la transferencia es condicional: un particular aporta **DNI/NIE**
+y contrato, una empresa aporta **CIF** y **factura**. Ese `si` se resuelve
+leyendo el expediente… que en esta pantalla **todavía no existe**. Por eso la
+subida pregunta primero *quién vende* y *quién compra*, y solo entonces pinta la
+lista. Sin esa pregunta pediría siempre el DNI del vendedor, incluso vendiendo un
+concesionario, y el CIF no habría manera de subirlo.
+
+La respuesta nace con el expediente (`datos.vendedor_tipo`,
+`datos.comprador_tipo`), así que la ficha y su checklist coinciden desde el
+primer momento. Después, el propio checklist confirma lo mismo por su cuenta: un
+`cif_vendedor` o una `factura_venta` marcan al vendedor como empresa; un
+`cif_comprador`, al comprador. Va con confianza **alta** y origen `checklist`
+—no es una lectura del modelo, es qué documento se ha aportado— y como todo lo
+demás **sigue siendo propuesta**: la valida el gestor.
+
+Con el vendedor en empresa, la pestaña de ITP avisa de que una venta con factura
+sujeta a IVA suele quedar **exenta**. El aviso es solo eso: la exención la marca
+el gestor con su toggle, nunca Gest-IA.
+
 ### 3 · El ITP
 
 Se calcula con el motor real `gestotrafic-itp` en cuanto el gestor confirma el

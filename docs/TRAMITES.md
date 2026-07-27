@@ -112,23 +112,35 @@ su checklist, entra en el Kanban y aparece en el filtro por trámite del listado
 
 ---
 
-## Vendedor particular o empresa en la Transferencia
+## Partes particular o empresa en la Transferencia
 
-La transferencia distingue **quién vende**:
+La transferencia distingue **quién vende** y **quién compra**:
 
-| | Vendedor particular | Vendedor empresa / concesionario |
+| | Particular | Empresa / concesionario |
 |---|---|---|
 | Datos del vendedor | se escriben a mano | se **vuelcan** de su ficha de cliente (solo lectura) |
-| Identificación | DNI / NIE del vendedor | **CIF** de la empresa vendedora |
+| Identificación | DNI / NIE de esa parte | **CIF** de esa parte |
 | Documento de la venta | **Contrato de compraventa** | **Factura de venta** |
 | ITP | lo calcula `gestotrafic-itp` | lo calcula igual, salvo exención confirmada |
 
-El tipo se guarda en `datos.vendedor_tipo` y la empresa elegida en
-`datos.vendedor_empresa_id`. Los datos volcados siguen escribiéndose en las
-mismas columnas de siempre (`vendedor_nombre`, `vendedor_nif`,
-`vendedor_direccion`, `vendedor_telefono`): **no hubo migración de esquema**.
+Un particular se identifica con su DNI/NIE y una empresa con su CIF: **pedir el
+documento que no toca deja el expediente sin la identidad fiscal correcta** de
+esa parte. Por eso el checklist es condicional y no una lista fija.
+
+El tipo se guarda en `datos.vendedor_tipo` / `datos.comprador_tipo` y la empresa
+vendedora elegida en `datos.vendedor_empresa_id`. Los datos siguen escribiéndose
+en las mismas columnas de siempre (`vendedor_nombre`, `vendedor_nif`,
+`comprador_nif`…): **no hubo migración de esquema**.
+
+Las dos partes no son simétricas: solo el **vendedor** tiene selector de empresa
+del CRM y volcado automático. El comprador cambia la etiqueta de sus campos
+(*DNI / NIF* → *CIF*) y el documento que se le pide, pero se escribe a mano o se
+copia del cliente del expediente.
 
 El checklist se adapta con la misma mecánica de `si` que el resto del catálogo.
+Como los `si` leen del expediente, **el alta con Gest-IA pregunta el tipo de
+cada parte antes de subir nada**: sin expediente todavía creado, la lista se
+construiría siempre en modo particular.
 
 ### Exención de ITP · decisión del gestor, nunca automática
 

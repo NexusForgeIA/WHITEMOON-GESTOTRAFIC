@@ -171,9 +171,11 @@ auditable y reversible. Detalle en [`TRAMITES.md`](TRAMITES.md).
 ### 6 · Documentación
 
 Checklist por trámite con 5 documentos obligatorios y 2 opcionales (ITV, otros).
-En la transferencia el checklist **se adapta al vendedor**: con un particular
-pide *DNI del vendedor* y *Contrato de compraventa*; con una empresa pide *CIF
-de la empresa vendedora* y **Factura de venta**.
+En la transferencia el checklist **se adapta a quién vende y quién compra**: de
+un particular pide su *DNI / NIE*; de una empresa, su *CIF*. Y el documento de
+la venta es un *Contrato de compraventa* entre particulares o la **Factura de
+venta** si vende una empresa. El alta con Gest-IA pregunta el tipo de cada parte
+antes de subir, porque el expediente todavía no existe para deducirlo.
 Cada documento tiene estado *pendiente* / *recibido*, barra de progreso, y se
 sube (foto o escaneo, JPG/PNG/PDF, máx. 10 MB) al bucket aislado
 `gestotrafic-docs` de Supabase Storage. Subir un documento del mismo tipo
