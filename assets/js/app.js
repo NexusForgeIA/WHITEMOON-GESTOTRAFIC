@@ -243,11 +243,18 @@
      ============================================================ */
 
   /* Clientes con tipo `empresa`. Se refresca al entrar en las vistas que
-     necesitan elegir una empresa vendedora. */
+     necesitan elegir una empresa vendedora.
+
+     `fichas` es la lista COMPLETA. La exportación a OEGAM la necesita: el
+     municipio, el CP y la provincia de cada parte están en columnas propias
+     de la ficha del cliente, y del domicilio en texto libre del expediente
+     no se deducen. Se cruza por NIF exacto, nunca por parecido de nombre. */
   let empresas = [];
+  let fichas = [];
 
   async function cargarClientes() {
     const clientes = await GTApi.listarClientes();
+    fichas = clientes;
     empresas = clientes.filter(c => c.tipo === 'empresa');
     return clientes;
   }
@@ -1028,6 +1035,7 @@
     pestanas.push({ id: 'docs', label: 'Documentación' });
     if (tr.genera === 'contrato') pestanas.push({ id: 'genera', label: 'Contrato' });
     if (tr.genera === 'comunicacion') pestanas.push({ id: 'genera', label: 'Comunicación' });
+    if (tr.exporta === 'oegam') pestanas.push({ id: 'oegam', label: 'Exportar a OEGAM' });
 
     view.innerHTML = `
       ${cabecera()}
@@ -1063,7 +1071,8 @@
       itp: () => panelITP(exp, cont),
       datos: () => panelDatos(exp, tr, cont),
       docs: () => panelDocs(exp, tr, docs, cont),
-      genera: () => panelGenera(exp, tr, cont)
+      genera: () => panelGenera(exp, tr, cont),
+      oegam: () => panelOegam(exp, tr, cont)
     };
     paneles[pestanas[0].id]();
 
@@ -2322,6 +2331,123 @@
     cont.querySelector('#btn-generar-dl').addEventListener('click', () => {
       esContrato ? GTContrato.descargar(exp) : GTContrato.descargarComunicacion(exp);
       toast('Documento descargado', 'ok');
+    });
+  }
+
+  /* ---------- Panel: exportar a OEGAM (XML del Colegio de Madrid) ----------
+     El XML se arma ENTERO en el navegador: todos los datos que necesita ya
+     están en el expediente cargado, así que no hay Edge Function, no se
+     escribe en el bucket y no queda ningún huérfano que alguien tenga que
+     ir a borrar. El archivo solo existe en la descarga del gestor. */
+  function panelOegam(exp, tr, cont) {
+    const r = GTOegam.construir(exp, { clientes: fichas });
+    const exento = T.esExentoITP(exp);
+
+    const filas = (lista) => lista.map(x => `
+      <li><span class="t-mono">${h(x.tag)}</span> · ${h(x.motivo || x.etiqueta || '')}</li>`).join('');
+
+    cont.innerHTML = `
+      <div class="card" style="max-width:880px">
+        <div class="card-t">Exportar a OEGAM · XML para el programa del Colegio</div>
+        <p class="t-muted" style="font-size:.8rem;margin-top:0">
+          Genera el fichero <b>FORMATO_GA</b> que se importa en el programa del
+          <b>Colegio de Gestores de Madrid</b>, con los datos del expediente
+          <span class="t-mono">${h(exp.referencia)}</span>. Es para <b>no reteclear</b>:
+          el gestor revisa el XML, completa lo que falte y lo importa él.
+        </p>
+
+        <dl class="dl" style="margin:18px 0">
+          <dt>Adquiriente</dt><dd>${h(exp.comprador_nombre || '—')}
+            ${T.esCompradorEmpresa(exp) ? '<span class="badge badge-tramite">Empresa</span>' : ''}</dd>
+          <dt>Transmitente</dt><dd>${h(exp.vendedor_nombre || '—')}
+            ${T.esVendedorEmpresa(exp) ? '<span class="badge badge-tramite">Empresa</span>' : ''}</dd>
+          <dt>Vehículo</dt><dd>${h([exp.marca, exp.modelo].filter(Boolean).join(' ') || '—')}
+            · <span class="t-mono">${h(exp.matricula || 'sin matrícula')}</span></dd>
+          <dt>Bastidor</dt><dd class="t-mono">${h(T.leer(exp, 'bastidor') || '—')}</dd>
+          <dt>Fecha de contrato</dt><dd>${fecha(T.leer(exp, 'fecha_venta'))}</dd>
+          <dt>ITP</dt><dd>MODELO_ITP <span class="t-mono">620</span> ·
+            EXENTO_ITP <span class="t-mono">${exento ? 'SI' : 'NO'}</span>
+            <small class="t-muted">(${exento
+              ? 'lo marcó el gestor en la pestaña de ITP'
+              : 'sin exención confirmada'})</small></dd>
+        </dl>
+
+        ${r.faltan.length ? `<div class="regul-note" style="margin-bottom:14px">
+          ${svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>')}
+          <div><b>Faltan ${r.faltan.length} campo${r.faltan.length === 1 ? '' : 's'} obligatorio${r.faltan.length === 1 ? '' : 's'}</b>
+            para que la importación sirva de algo:
+            <b>${h(r.faltan.map(x => x.etiqueta).join(', '))}</b>.
+            El XML se genera igual —con esos tags vacíos, no inventados—, pero
+            complétalos antes de importarlo.</div>
+        </div>` : ''}
+
+        ${r.pendientes.length ? `<details class="gt-detalle">
+          <summary><b>${r.pendientes.length} campos los completa el gestor</b>
+            · van vacíos a propósito</summary>
+          <ul style="margin:10px 0 0;padding-left:20px;line-height:1.7">
+            ${filas(r.pendientes)}
+          </ul>
+        </details>` : ''}
+
+        <details class="gt-detalle">
+          <summary><b>${r.asignaOegam.length} campos los asigna OEGAM/DGT</b>
+            · siempre vacíos</summary>
+          <ul style="margin:10px 0 0;padding-left:20px;line-height:1.7">
+            ${r.asignaOegam.map(t => `<li><span class="t-mono">${h(t)}</span></li>`).join('')}
+          </ul>
+          <p style="margin:10px 0 0">
+            El número de documento y los códigos electrónicos los pone la
+            plataforma al importar. GestoTrafic no los inventa.</p>
+        </details>
+
+        <div class="row-actions">
+          <button class="btn" id="btn-oegam">Exportar a OEGAM (XML)</button>
+          <button class="btn btn-ghost" id="btn-oegam-ver">Ver el XML</button>
+        </div>
+
+        <div id="oegam-salida"></div>
+
+        <p class="t-muted" style="font-size:.76rem;margin:16px 0 0">
+          Se genera <b>en el navegador</b> y en <b>ISO-8859-1</b>, como pide el formato.
+          No se guarda copia en ningún sitio: el archivo solo existe en tu descarga.
+        </p>
+      </div>`;
+
+    cont.querySelector('#btn-oegam').addEventListener('click', () => {
+      const salida = GTOegam.descargar(exp, { clientes: fichas });
+      cont.querySelector('#oegam-salida').innerHTML = `
+        <div class="doc-row ok" style="margin-top:14px">
+          <div class="doc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+          <div class="doc-info">
+            <strong>${h(salida.nombre)} · descargado</strong>
+            <small>${Math.round(salida.bytes.length / 1024 * 10) / 10} KB · ISO-8859-1${salida.faltan.length
+              ? ' · ' + salida.faltan.length + ' campo(s) obligatorio(s) vacío(s)' : ''}</small>
+          </div>
+        </div>
+        ${salida.fueraLatin1.length ? `<div class="regul-note" style="margin-top:10px">
+          ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
+          <div>Estos caracteres no existen en ISO-8859-1 y se han sustituido por
+            <span class="t-mono">?</span>: <b>${h(salida.fueraLatin1.join(' '))}</b>.
+            Revísalos en el XML antes de importar.</div>
+        </div>` : ''}`;
+      toast('XML de OEGAM descargado', 'ok');
+    });
+
+    cont.querySelector('#btn-oegam-ver').addEventListener('click', () => {
+      modal({
+        titulo: 'XML OEGAM · ' + exp.referencia,
+        ancho: 880,
+        okTexto: 'Copiar al portapapeles',
+        cuerpo: `<pre style="max-height:60vh;overflow:auto;font-size:.72rem;line-height:1.5;
+          background:rgba(0,0,0,.25);padding:14px;border-radius:8px;white-space:pre">${h(r.xml)}</pre>`,
+        onOk: async () => {
+          /* Al portapapeles va el TEXTO. El archivo en ISO-8859-1 es el del
+             botón de descarga: un pegado en un editor cualquiera lo
+             guardaría en UTF-8 y los acentos se importarían mal. */
+          await navigator.clipboard.writeText(r.xml);
+          toast('XML copiado · ojo: el archivo válido es el de la descarga', 'ok');
+        }
+      });
     });
   }
 
