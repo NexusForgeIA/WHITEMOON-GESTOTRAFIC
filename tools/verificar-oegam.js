@@ -33,11 +33,22 @@ const RAIZ = path.join(__dirname, '..');
 const PLANTILLA = path.join(RAIZ, 'data', 'oegam', 'plantilla-transferencia.xml');
 const FUENTE = path.join(RAIZ, 'assets', 'js', 'oegam.js');
 
-/* El exportador es un IIFE sobre `window`/`globalThis`: se ejecuta tal cual,
-   sin copiar ni reimplementar nada. Si cambia, cambia lo que se verifica. */
+/* Los módulos del CRM son IIFE sobre `window`: se ejecutan tal cual, sin
+   copiar ni reimplementar nada. Si cambian, cambia lo que se verifica.
+
+   Van los cuatro y en su orden porque la comprobación de punta a punta
+   recorre la cadena entera: lo que Gest-IA lee del DNI → gestia.js lo mapea
+   a `datos` → oegam.js lo escribe en el XML. Probar solo el último tramo
+   dejaría fuera justo donde se pierden los datos. */
+global.window = globalThis;
+['config', 'tramites', 'gestia'].forEach(m =>
+  (0, eval)(fs.readFileSync(path.join(RAIZ, 'assets', 'js', m + '.js'), 'utf8')));
 (0, eval)(fs.readFileSync(FUENTE, 'utf8'));
+
 const O = globalThis.GTOegam;
-if (!O) { console.error('No se pudo cargar assets/js/oegam.js'); process.exit(2); }
+const IA = globalThis.GTGestIA;
+const TR = globalThis.GTTramites;
+if (!O || !IA || !TR) { console.error('No se pudieron cargar los módulos del CRM'); process.exit(2); }
 
 /* ============================================================
    Tokenizador · valida y devuelve los elementos en orden
@@ -397,6 +408,300 @@ ok(O.partirDireccion('Av. de España 22, Madrid').tipoVia === 'AVENIDA',
   '«Av. de España 22» → AVENIDA');
 ok(O.partirDireccion('Un sitio sin tipo de via').tipoVia === '',
   'una dirección sin tipo de vía reconocible no se fuerza a ninguno');
+
+/* ============================================================
+   11 · De punta a punta · los dos DNIs leídos
+   ------------------------------------------------------------
+   Esto es lo que hay que demostrar: con la config demo y los DNIs de
+   comprador y vendedor leídos a dos caras, el XML sale COMPLETO.
+
+   Se simula la respuesta de la Edge Function —el JSON que devuelve Claude
+   por documento— y se hace pasar por la cadena real: GTGestIA.propuestas →
+   aExpediente → GTOegam.construir. Ni un solo campo se escribe a mano en el
+   expediente, así que si el mapeo se rompe, esto se cae.
+   ============================================================ */
+console.log('\n11 · De punta a punta · los dos DNIs leídos');
+
+/** Un campo tal y como lo devuelve la Edge Function. */
+const c = (valor, confianza) => ({ valor, confianza: confianza || 'alta', nota: '' });
+
+/** Lectura de un DNI a dos caras, con el formato exacto de gestia-extraer. */
+function lecturaDni(tipo, d) {
+  return {
+    extraido: true, tipo, perfil: 'dni',
+    legible: true, observacion: '',
+    caras_vistas: { anverso: true, reverso: true },
+    caras_faltan: [],
+    campos: {
+      nombre: c(d.nombre), apellido1: c(d.apellido1), apellido2: c(d.apellido2),
+      numero: c(d.numero), sexo: c(d.sexo),
+      fecha_nacimiento: c(d.nacimiento), fecha_caducidad: c(d.caducidad),
+      direccion: c(d.direccion),
+      via_nombre: c(d.via), via_numero: c(d.via_numero),
+      via_escalera: c(d.escalera || ''), via_piso: c(d.piso || ''),
+      via_puerta: c(d.puerta || ''), via_letra: c(d.letra || ''),
+      municipio: c(d.municipio), provincia: c(d.provincia), cp: c(d.cp)
+    }
+  };
+}
+
+const LECTURAS = [
+  lecturaDni('dni_comprador', {
+    nombre: 'Lucia', apellido1: 'Ferrer', apellido2: 'Ibáñez',
+    numero: '00000002S', sexo: 'mujer',
+    nacimiento: '1985-03-14', caducidad: '2032-05-20',
+    direccion: 'SIETE VIENTOS 39 PBJ',
+    via: 'SIETE VIENTOS', via_numero: '39', piso: 'PBJ',
+    municipio: 'Majadahonda', provincia: 'Madrid', cp: '28220'
+  }),
+  lecturaDni('dni_vendedor', {
+    nombre: 'Andres', apellido1: 'De La Fuente', apellido2: 'Ruiz',
+    numero: '00000001R', sexo: 'hombre',
+    nacimiento: '1970-01-01', caducidad: '2030-01-01',
+    direccion: 'CALLE EJEMPLO 1, 2 B',
+    via: 'EJEMPLO', via_numero: '1', piso: '2', puerta: 'B',
+    municipio: 'Málaga', provincia: 'Málaga', cp: '29000'
+  }),
+  {
+    extraido: true, tipo: 'ficha_tecnica', perfil: 'ficha_tecnica',
+    legible: true, observacion: '', campos: {
+      marca: c('Mercedes-Benz'), modelo: c('Clase A 180 d'),
+      bastidor: c('WDD1760121J000000'), matricula: c('4821 NBH'),
+      fecha_matriculacion: c('2019-06-10'), combustible: c('Diesel'),
+      cvf: c('9.5'), cilindrada: c('1461'), clasificacion: c('TURISMO')
+    }
+  }
+];
+
+const trTransfer = TR.tramite('transferencia');
+const props = IA.propuestas(trTransfer, LECTURAS);
+const fila = IA.aExpediente(trTransfer, props, {
+  comprador_tipo: 'particular', vendedor_tipo: 'particular'
+});
+
+/* El expediente tal y como queda tras el alta con Gest-IA. `fila` trae las
+   columnas propias y `fila.datos` el jsonb; se juntan igual que en el CRM. */
+const EXP_IA = Object.assign({ referencia: 'EXP-2026-0042' }, fila);
+EXP_IA.datos = Object.assign({}, fila.datos, { fecha_venta: '2026-03-05' });
+
+const eIA = elementos(O.construir(EXP_IA, { hoy: HOY }).xml);
+const rIA = O.construir(EXP_IA, { hoy: HOY });
+const v = (ruta) => valorDe(eIA, 'FORMATO_GA/TRANSMISION/' + ruta);
+
+// --- Gestoría y presentador, de la config demo ---
+console.log('\n   Gestoría y presentador (config demo)');
+[
+  ['CABECERA/DATOS_GESTORIA/NIF', 'B00000000'],
+  ['CABECERA/DATOS_GESTORIA/NOMBRE', 'WHITEMOON TRÁFICO'],
+  ['CABECERA/DATOS_GESTORIA/PROFESIONAL', '0000'],
+  ['CABECERA/DATOS_GESTORIA/PROVINCIA', 'M']
+].forEach(([ruta, esperado]) => {
+  const got = valorDe(eIA, 'FORMATO_GA/' + ruta);
+  ok(got === esperado, `${ruta.split('/').pop()} = ${esperado}`, got);
+});
+[
+  ['DNI_PRESENTADOR', 'B00000000'],
+  ['APELLIDO1_RAZON_SOCIAL_PRESENTADOR', 'WHITEMOON TRÁFICO'],
+  ['TELEFONO_PRESENTADOR', '900000000'],
+  ['NOMBRE_VIA_DIRECCION_PRESENTADOR', 'MADRID'],
+  ['NUMERO_DIRECCION_PRESENTADOR', '9'],
+  ['PISO_DIRECCION_PRESENTADOR', '2'],
+  ['PUERTA_DIRECCION_PRESENTADOR', 'B'],
+  ['MUNICIPIO_PRESENTADOR', 'MAJADAHONDA'],
+  ['CP_PRESENTADOR', '28220'],
+  ['PROVINCIA_PRESENTADOR', 'M']
+].forEach(([tag, esperado]) => {
+  const got = v('DATOS_PRESENTADOR/' + tag);
+  ok(got === esperado, `${tag} = ${esperado}`, got);
+});
+
+// --- Adquiriente: mujer → H ---
+console.log('\n   Adquiriente · del DNI del comprador');
+[
+  ['DNI_ADQUIRIENTE', '00000002S'],
+  ['SEXO_ADQUIRIENTE', 'H'],
+  ['NOMBRE_ADQUIRIENTE', 'LUCIA'],
+  ['APELLIDO1_RAZON_SOCIAL_ADQUIRIENTE', 'FERRER'],
+  ['APELLIDO2_ADQUIRIENTE', 'IBÁÑEZ'],
+  ['FECHA_NACIMIENTO_ADQUIRIENTE', '14/03/1985'],
+  ['FECHA_CADUCIDAD_NIF_ADQUIRIENTE', '20/05/2032'],
+  ['NOMBRE_VIA_DIRECCION_ADQUIRIENTE', 'SIETE VIENTOS'],
+  ['NUMERO_DIRECCION_ADQUIRIENTE', '39'],
+  ['PISO_DIRECCION_ADQUIRIENTE', 'PBJ'],
+  ['MUNICIPIO_ADQUIRIENTE', 'MAJADAHONDA'],
+  ['PROVINCIA_ADQUIRIENTE', 'M'],
+  ['CP_ADQUIRIENTE', '28220']
+].forEach(([tag, esperado]) => {
+  const got = v('DATOS_ADQUIRIENTE/' + tag);
+  ok(got === esperado, `${tag} = ${esperado}`, got);
+});
+
+// --- Transmitente: hombre → V, y un apellido compuesto sin partir ---
+console.log('\n   Transmitente · del DNI del vendedor');
+[
+  ['SEXO_TRANSMITENTE', 'V'],
+  ['NOMBRE_TRANSMITENTE', 'ANDRES'],
+  ['APELLIDO1_RAZON_SOCIAL_TRANSMITENTE', 'DE LA FUENTE'],
+  ['APELLIDO2_TRANSMITENTE', 'RUIZ'],
+  ['FECHA_NACIMIENTO_TRANSMITENTE', '01/01/1970'],
+  ['FECHA_CADUCIDAD_NIF_TRANSMITENTE', '01/01/2030'],
+  ['NOMBRE_VIA_DIRECCION_TRANSMITENTE', 'EJEMPLO'],
+  ['NUMERO_DIRECCION_TRANSMITENTE', '1'],
+  ['PISO_DIRECCION_TRANSMITENTE', '2'],
+  ['PUERTA_DIRECCION_TRANSMITENTE', 'B'],
+  ['PROVINCIA_TRANSMITENTE', 'MA'],
+  ['CP_TRANSMITENTE', '29000']
+].forEach(([tag, esperado]) => {
+  const got = v('DATOS_TRANSMITENTE/' + tag);
+  ok(got === esperado, `${tag} = ${esperado}`, got);
+});
+
+// --- Vehículo y contrato ---
+console.log('\n   Vehículo y contrato');
+ok(v('DATOS_VEHICULO/NUMERO_BASTIDOR') === 'WDD1760121J000000',
+  'NUMERO_BASTIDOR llega desde la ficha técnica', v('DATOS_VEHICULO/NUMERO_BASTIDOR'));
+ok(v('MATRICULA') === '4821 NBH', 'MATRICULA', v('MATRICULA'));
+ok(v('DATOS_PRESENTACION/FECHA_CONTRATO') === '05/03/2026',
+  'FECHA_CONTRATO sale de la fecha del contrato del expediente',
+  v('DATOS_PRESENTACION/FECHA_CONTRATO'));
+
+// --- Y lo que importa: qué queda vacío ---
+console.log('\n   Lo único que queda vacío');
+const RELLENOS_OBLIGADOS = [
+  'NIF', 'NOMBRE', 'PROFESIONAL', 'PROVINCIA', 'MATRICULA', 'NUMERO_BASTIDOR',
+  'MARCA', 'MODELO', 'FECHA_MATRICULACION', 'FECHA_CONTRATO',
+  'DNI_ADQUIRIENTE', 'SEXO_ADQUIRIENTE', 'FECHA_NACIMIENTO_ADQUIRIENTE',
+  'DNI_TRANSMITENTE', 'SEXO_TRANSMITENTE', 'FECHA_NACIMIENTO_TRANSMITENTE'
+];
+const huecos = RELLENOS_OBLIGADOS.filter(t => !valorDe(eIA, eIA.find(x => x.tag === t).ruta));
+ok(huecos.length === 0, 'ningún campo de datos se queda vacío', huecos.join(', '));
+ok(rIA.faltan.length === 0, 'el informe no reporta ningún obligatorio pendiente',
+  rIA.faltan.map(x => x.tag).join(', '));
+
+/* Los pendientes que quedan tienen que ser SOLO los tipos de vía (sin
+   catálogo) y la nota de TARA/PESO/PLAZAS. Nada de personas. */
+const pendPersona = rIA.pendientes.filter(p =>
+  !/^SIGLAS_DIRECCION_/.test(p.tag) && !/^TARA/.test(p.tag));
+ok(pendPersona.length === 0,
+  'no queda ningún hueco de persona: solo SIGLAS_DIRECCION y la nota de TARA',
+  pendPersona.map(p => p.tag).join(', '));
+
+/* ============================================================
+   11 bis · El esquema del DNI cabe en el límite de la API
+   ------------------------------------------------------------
+   La API admite como mucho 16 parámetros con unión (`anyOf`) por esquema, y
+   un `valor` nullable gasta uno. Pasarse no da un aviso: devuelve 400 y
+   TODA lectura de DNI deja de funcionar de golpe, en producción y sin que
+   ningún test de aquí se entere. Por eso se cuenta desde fuera.
+   ============================================================ */
+console.log('\n11 bis · Presupuesto de uniones del esquema de Gest-IA');
+/* Sin normalizar los saltos de línea esto no encuentra nada en Windows, donde
+   git deja el fichero en CRLF, y un `✗` por el final de línea no dice nada. */
+const FN = fs.readFileSync(
+  path.join(RAIZ, 'supabase', 'functions', 'gestia-extraer', 'index.ts'), 'utf8')
+  .replace(/\r\n/g, '\n');
+
+const perfilDni = /\bdni:\s*\{[\s\S]*?\n  \},\n  cif:/.exec(FN);
+ok(!!perfilDni, 'se localiza el perfil `dni` en la Edge Function');
+if (perfilDni) {
+  const campos = perfilDni[0].match(/^\s{6}\w+:\s*\{/gm) || [];
+  const simples = perfilDni[0].match(/simple:\s*true/g) || [];
+  const uniones = campos.length - simples.length;
+  console.log(`      ${campos.length} campos · ${simples.length} sin unión · ${uniones} uniones`);
+  ok(uniones <= 16, `el perfil dni gasta ${uniones} uniones y el tope es 16`);
+  ok(simples.length === 6, 'los seis campos del desglose de la vía van sin unión', String(simples.length));
+}
+
+/* ============================================================
+   12 · Sexo · V hombre · H mujer · X empresa
+   ============================================================ */
+console.log('\n12 · Códigos de sexo');
+ok(IA.sexoDe('hombre') === 'V', '«hombre» → V');
+ok(IA.sexoDe('mujer') === 'H', '«mujer» → H  (H, no M)');
+ok(IA.sexoDe('Mujer') === 'H', 'la caja da igual');
+ok(IA.sexoDe('varón') === 'V', '«varón», con tilde, también');
+ok(IA.sexoDe('M') === null, '«M» sola se descarta: en el DNI es masculino y aquí no es nada');
+ok(IA.sexoDe('F') === null, '«F» sola se descarta igual');
+ok(IA.sexoDe(null) === null, 'sin lectura, null');
+ok(O.CONSTANTES.SEXOS.join('') === 'VHX', 'el exportador solo admite V, H o X');
+
+/* Un sexo que no sea uno de los tres no llega al XML. */
+const sexoRaro = O.construir(
+  Object.assign({}, EXP_IA, {
+    datos: Object.assign({}, EXP_IA.datos, { comprador_sexo: 'M' })
+  }), { hoy: HOY });
+ok(valorDe(elementos(sexoRaro.xml), 'FORMATO_GA/TRANSMISION/DATOS_ADQUIRIENTE/SEXO_ADQUIRIENTE') === '',
+  'un «M» colado en el expediente sale VACÍO, no se traduce a ojo');
+
+/* Una empresa es X aunque nadie lo haya leído de ningún documento. */
+const empresaCompra = O.construir(
+  Object.assign({}, EXP_IA, {
+    datos: Object.assign({}, EXP_IA.datos, { comprador_tipo: 'empresa', comprador_sexo: null })
+  }), { hoy: HOY });
+ok(valorDe(elementos(empresaCompra.xml), 'FORMATO_GA/TRANSMISION/DATOS_ADQUIRIENTE/SEXO_ADQUIRIENTE') === 'X',
+  'un comprador empresa es X por serlo, sin necesidad de lectura');
+
+/* Y Gest-IA lo propone sola en cuanto aparece el CIF en el checklist. */
+const conCif = IA.propuestas(trTransfer, [{ extraido: true, tipo: 'cif_comprador', perfil: 'cif', campos: {
+  razon_social: c('EMPRESA EJEMPLO SL'), cif: c('B00000001'),
+  domicilio: c('VIA EJEMPLO 1'), provincia: c('Barcelona') } }]);
+ok(conCif.comprador_sexo && conCif.comprador_sexo.valor === 'X',
+  'con un CIF en el checklist, Gest-IA propone X');
+
+/* ============================================================
+   13 · DNI caducado · avisa, no calla
+   ============================================================ */
+console.log('\n13 · DNI caducado');
+const caducado = O.construir(
+  Object.assign({}, EXP_IA, {
+    datos: Object.assign({}, EXP_IA.datos, { vendedor_caducidad_nif: '2024-02-29' })
+  }), { hoy: HOY });
+
+ok(valorDe(elementos(caducado.xml), 'FORMATO_GA/TRANSMISION/DATOS_TRANSMITENTE/FECHA_CADUCIDAD_NIF_TRANSMITENTE')
+  === '29/02/2024',
+  'la fecha caducada va al XML tal cual: no se oculta ni se corrige');
+ok(caducado.avisos.some(a => a.tipo === 'dni_caducado' && /vendedor/.test(a.texto)),
+  'y salta el aviso de DNI caducado del vendedor');
+ok(!rIA.avisos.some(a => a.tipo === 'dni_caducado'),
+  'con los dos DNIs en vigor no salta ningún aviso de caducidad');
+
+/* ============================================================
+   14 · La config de demo se declara demo
+   ============================================================ */
+console.log('\n14 · Config de demo señalada');
+ok(globalThis.GT_CONFIG.GESTORIA.demo === true,
+  'GT_CONFIG.GESTORIA lleva `demo: true`');
+ok(rIA.avisos.some(a => a.tipo === 'gestoria_demo'),
+  'y el informe avisa de que el CIF y el colegiado son inventados');
+ok(!O.construir(EXP_IA, { gestoria: GESTORIA, hoy: HOY })
+  .avisos.some(a => a.tipo === 'gestoria_demo'),
+  'con una gestoría real (sin la bandera) el aviso desaparece');
+
+/* ============================================================
+   15 · «SIETE VIENTOS 39 PBJ» · el bug que había
+   ============================================================ */
+console.log('\n15 · El nombre de la vía es solo el nombre de la vía');
+const sv = O.partirDireccion('SIETE VIENTOS 39 PBJ');
+ok(sv.via === 'SIETE VIENTOS', 'via = «SIETE VIENTOS», sin el número ni la planta', sv.via);
+ok(sv.numero === '39', 'numero = 39', sv.numero);
+ok(sv.restoSinUsar === 'PBJ',
+  '«PBJ» queda apartado y señalado, no pegado al nombre de la calle', sv.restoSinUsar);
+
+/* Sin DNI leído, el desglose no se inventa: solo vía y número. */
+const soloTexto = O.construir({
+  referencia: 'EXP-2026-0099', matricula: '1111 AAA',
+  comprador_nombre: 'X', comprador_nif: '00000002S',
+  comprador_direccion: 'SIETE VIENTOS 39 PBJ',
+  vendedor_nombre: 'Y', vendedor_nif: '00000001R',
+  datos: { comprador_tipo: 'particular', vendedor_tipo: 'particular' }
+}, { hoy: HOY });
+const eST = elementos(soloTexto.xml);
+ok(valorDe(eST, 'FORMATO_GA/TRANSMISION/DATOS_ADQUIRIENTE/NOMBRE_VIA_DIRECCION_ADQUIRIENTE') === 'SIETE VIENTOS',
+  'del texto libre sale la vía limpia');
+ok(valorDe(eST, 'FORMATO_GA/TRANSMISION/DATOS_ADQUIRIENTE/PISO_DIRECCION_ADQUIRIENTE') === '',
+  'pero el piso NO se deduce de «PBJ» sin ver el DNI');
+ok(soloTexto.pendientes.some(p => p.tag === 'PISO_DIRECCION_ADQUIRIENTE' && /PBJ/.test(p.motivo)),
+  'y el informe enseña lo que quedó sin repartir');
 
 /* ============================================================ */
 console.log('\n' + '='.repeat(52));

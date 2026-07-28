@@ -44,30 +44,50 @@ window.GT_CONFIG = {
      añadir un módulo, no tocar la ficha del expediente. */
   EXPORTACION: 'oegam',
 
-  /* Datos de la gestoría.
-     Los cuatro primeros salen en el contrato y en la portada del expediente
-     completo. Los demás los pide el XML de OEGAM (DATOS_GESTORIA y
-     DATOS_PRESENTADOR) y son EXACTAMENTE los mismos datos colegiados que
-     firman el mandato.
+  /* ⚠️ DATOS DE LA GESTORÍA · FICTICIOS, SON LOS DE LA DEMO ⚠️
+     ------------------------------------------------------------
+     Salen en el contrato, en la portada del expediente completo y en el XML
+     de OEGAM (DATOS_GESTORIA y DATOS_PRESENTADOR). Son los mismos datos
+     colegiados que firman el mandato.
 
-     Van VACÍOS a propósito, igual que `num_colegiado`: el CIF, el número de
-     profesional, el teléfono y el domicilio de la gestoría los aporta ella.
-     Rellenarlos a ojo pondría un NIF falso en un documento que se presenta
-     ante la DGT. Sin ellos el XML se genera igual, con esos tags vacíos y
-     señalados en el informe de exportación. */
+     `demo: true` los marca como PLACEHOLDER. Con esa bandera puesta, la
+     pestaña de exportación avisa en rojo de que el XML lleva un CIF y un
+     número de colegiado inventados y NO debe presentarse.
+
+     AL INSTALAR EN UNA GESTORÍA REAL: sustituye los cuatro marcados
+     «DEMO» por los suyos y quita `demo: true`. Son datos que aporta ella;
+     no se rellenan a ojo, porque un NIF falso acaba en un documento que se
+     presenta ante la DGT.
+
+     La diferencia con lo anterior es deliberada: antes iban vacíos, y en una
+     demo eso deja media exportación en blanco sin que se entienda por qué.
+     Un placeholder EVIDENTE y señalado enseña el formato entero y no se
+     confunde con un dato bueno. */
   GESTORIA: {
-    nombre: 'GestoTrafic · Gestoría de Tráfico',
+    nombre: 'WhiteMoon Tráfico',
     ciudad: 'Majadahonda, Madrid',
     provincia: 'Madrid',
-    /* Número de colegiado de la gestoría. Se imprime en la portada del
-       expediente completo y va en <PROFESIONAL>; vacío, no se imprime. */
-    num_colegiado: '',
-    // --- Solo para la exportación a OEGAM ---
-    nif: '',            // <NIF> y <DNI_PRESENTADOR>
-    telefono: '',       // <TELEFONO_PRESENTADOR>
-    direccion: '',      // se descompone en vía / número
-    municipio: '',      // <MUNICIPIO_PRESENTADOR>
-    cp: ''              // <CP_PRESENTADOR>
+
+    demo: true,                    // ← quitar al instalar en una gestoría real
+
+    num_colegiado: '0000',         // DEMO · <PROFESIONAL>
+    nif: 'B00000000',              // DEMO · <NIF> y <DNI_PRESENTADOR>
+    telefono: '900000000',         // DEMO · <TELEFONO_PRESENTADOR>
+
+    /* El domicilio va dos veces a propósito: `direccion` es la línea legible
+       que se imprime en el contrato y en la portada, y el desglose es lo que
+       pide OEGAM en campos separados. Aquí se declara desglosado en lugar de
+       partir la cadena, porque el domicilio de la propia gestoría se escribe
+       una vez y se sabe exactamente cómo se reparte. */
+    direccion: 'Calle Madrid 9, 2ºB',
+    via: 'Madrid',                 // <NOMBRE_VIA_DIRECCION_PRESENTADOR>
+    via_numero: '9',
+    escalera: '',
+    piso: '2',
+    puerta: 'B',
+    letra: '',
+    municipio: 'Majadahonda',      // <MUNICIPIO_PRESENTADOR>
+    cp: '28220'                    // <CP_PRESENTADOR> · provincia M (Madrid)
   }
 };
 

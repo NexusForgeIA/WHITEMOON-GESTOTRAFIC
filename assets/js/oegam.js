@@ -21,10 +21,12 @@
        `SIGLAS` esté sin cargar: el código es numérico y su tabla la
        publica OEGAM. Se detecta la ETIQUETA («CALLE», «AVENIDA») y se
        dice cuál es, para que el gestor busque el código en dos segundos.
-     · El desglose de la dirección (letra, escalera, piso, puerta) NO se
-       adivina del texto libre: va vacío y marcado.
-     · Nombre y apellidos de un particular solo se separan cuando el dato
-       YA viene separado del CRM. De una cadena suelta no se deducen.
+     · Los datos de una PERSONA —sexo, nacimiento, caducidad y el desglose
+       del domicilio— salen de su DNI, leído por Gest-IA a dos caras. Lo
+       que no se lea queda vacío y marcado; del texto libre NO se deducen.
+     · Nombre y apellidos de un particular se separan solo si vienen ya
+       separados (del DNI o de la ficha del CRM). De una cadena suelta no.
+     · El sexo solo admite V (hombre), H (mujer) o X (persona jurídica).
 
    Nada de lo que sale de aquí se presenta solo: el gestor revisa el XML,
    completa lo marcado y lo importa él.
@@ -181,6 +183,14 @@
     EXENTO_IEDMT:               'NO',
     NO_SUJETO_IEDMT:            'NO',
     NUMERO_TITULARES:           '1',
+
+    /* Códigos de sexo del formato, confirmados por la gestoría:
+         V = hombre · H = mujer · X = persona jurídica
+       La de mujer es H, NO M. La M no significa nada aquí, y es justo la
+       letra que uno pondría por instinto —o la que trae el propio DNI, donde
+       M es «masculino»—. Se comprueba contra esta lista y lo que no sea uno
+       de los tres se queda vacío. */
+    SEXOS:                      ['V', 'H', 'X'],
     SEXO_PERSONA_JURIDICA:      'X'
   };
 
@@ -207,8 +217,8 @@
   const OBLIGATORIOS = [
     'NIF', 'NOMBRE', 'PROFESIONAL', 'PROVINCIA',
     'MATRICULA',
-    'DNI_ADQUIRIENTE', 'APELLIDO1_RAZON_SOCIAL_ADQUIRIENTE',
-    'DNI_TRANSMITENTE', 'APELLIDO1_RAZON_SOCIAL_TRANSMITENTE',
+    'DNI_ADQUIRIENTE', 'APELLIDO1_RAZON_SOCIAL_ADQUIRIENTE', 'SEXO_ADQUIRIENTE',
+    'DNI_TRANSMITENTE', 'APELLIDO1_RAZON_SOCIAL_TRANSMITENTE', 'SEXO_TRANSMITENTE',
     'NUMERO_BASTIDOR', 'MARCA', 'MODELO', 'FECHA_MATRICULACION',
     'FECHA_CONTRATO'
   ];
@@ -307,7 +317,7 @@
     // venga detrás (municipio, provincia) NO se reparte a ciegas.
     const partes = s.split(',');
     let via = partes.shift().trim();
-    out.restoSinUsar = partes.join(', ').trim();
+    const cola = [partes.join(', ').trim()];
 
     const nv = norm(via);
     const tipo = TIPOS_VIA.find(t => t.re.test(nv));
@@ -316,17 +326,24 @@
       via = via.replace(/^\s*[A-Za-zÀ-ÿ\/.]+\.?\s*/, '').trim();
     }
 
-    // Número: 1-4 dígitos al final o antes de una coma. Los 5 dígitos del
-    // CP ya se han retirado, así que no hay confusión posible.
-    const mnum = /(?:^|[\s,])(?:N[ºO°.]?\s*)?(\d{1,4})\s*$/.exec(via)
-              || /(?:^|[\s,])(?:N[ºO°.]?\s*)?(\d{1,4})(?=$|[\s,])/.exec(via);
+    /* El NOMBRE de la vía es lo que va ANTES del primer número, y solo eso.
+       En «SIETE VIENTOS 39 PBJ» el nombre es «SIETE VIENTOS»: el 39 es el
+       portal y «PBJ» la planta. Antes se quitaba el número y se dejaba
+       «SIETE VIENTOS PBJ» como nombre de calle, que no es ninguna calle.
+
+       Lo que sigue al número NO se reparte en piso/puerta: eso lo lee
+       Gest-IA del DNI, que está viendo el documento. Aquí solo se aparta,
+       para que no contamine el nombre, y se devuelve como `restoSinUsar`
+       para que el informe lo enseñe. */
+    const mnum = /(?:^|[\s,])(?:N[ºO°.]?\s*)?(\d{1,4})(?=$|[\s,])/.exec(via);
     if (mnum) {
       out.numero = mnum[1];
-      via = (via.slice(0, mnum.index) + ' ' + via.slice(mnum.index + mnum[0].length))
-        .replace(/\s+/g, ' ').replace(/[\s,]+$/, '').trim();
+      cola.unshift(via.slice(mnum.index + mnum[0].length).replace(/^[\s,]+/, '').trim());
+      via = via.slice(0, mnum.index).replace(/[\s,]+$/, '').trim();
     }
 
     out.via = via;
+    out.restoSinUsar = cola.filter(Boolean).join(', ');
     return out;
   }
 
@@ -351,29 +368,54 @@
     return clientes.find(c => norm(c.nif).replace(/[^A-Z0-9]/g, '') === n) || null;
   }
 
+  /** El primer valor que no esté vacío. */
+  const primero = (...vs) => {
+    for (const v of vs) if (!vacio(v)) return v;
+    return '';
+  };
+
   /**
    * Reúne los datos de una parte (comprador → adquiriente, vendedor →
-   * transmitente) desde el expediente y, si la hay, su ficha de cliente.
+   * transmitente).
+   *
+   * Tres fuentes, en este orden y por este motivo:
+   *
+   *   1. Lo que Gest-IA leyó del DNI (o corrigió el gestor), en `datos`.
+   *      Es el documento oficial de esa persona: manda.
+   *   2. La ficha de cliente del CRM, cruzada por NIF EXACTO. Tiene
+   *      municipio, CP y provincia en columnas propias.
+   *   3. El domicilio en texto libre del expediente, partido con cuidado.
+   *      Es el último recurso y solo aporta vía, número y CP.
+   *
+   * Lo que no salga de ninguna de las tres se queda vacío y sale en el
+   * informe. Nunca se rellena por parecido.
    */
-  function parte(exp, prefijo, clientes) {
-    const esEmpresa = leer(exp, prefijo + '_tipo') === 'empresa';
-    const nombre = leer(exp, prefijo + '_nombre');
-    const nif = leer(exp, prefijo + '_nif');
+  function parte(exp, prefijo, clientes, hoy) {
+    const d = (campo) => leer(exp, prefijo + '_' + campo);
+
+    const esEmpresa = d('tipo') === 'empresa';
+    const nombre = d('nombre');
+    const nif = d('nif');
     const cli = clienteDe(nif, clientes);
-    const dir = partirDireccion(leer(exp, prefijo + '_direccion'));
+    const libre = partirDireccion(d('direccion'));
 
-    /* Nombre y apellidos.
-       Empresa → la razón social entera va en APELLIDO1, que es lo que pide
-       el formato (APELLIDO1_RAZON_SOCIAL). Nombre y apellido2, vacíos.
+    /* --- Nombre y apellidos ---
+       Empresa → la razón social entera en APELLIDO1, que es lo que pide el
+       formato (APELLIDO1_RAZON_SOCIAL).
 
-       Particular → SOLO se separa si el CRM ya lo tiene separado, en las
-       columnas `nombre` y `apellidos` de la ficha del cliente. De la cadena
-       suelta «José María de la Fuente Ruiz» no se deduce dónde acaba el
-       nombre: eso lo marca el gestor. */
+       Particular → las tres piezas tal y como las lee Gest-IA del DNI, que
+       las imprime separadas. Si no hay lectura, la ficha del cliente. Y si
+       tampoco, VACÍO: de «José María de la Fuente Ruiz» en un solo campo no
+       se deduce dónde acaba el nombre, y partirlo por un espacio inscribiría
+       a otra persona. */
     let ape1 = '', ape2 = '', pila = '', avisoNombre = null;
 
     if (esEmpresa) {
       ape1 = mayus(nombre);
+    } else if (!vacio(d('apellido1'))) {
+      pila = mayus(d('nombre_pila'));
+      ape1 = mayus(d('apellido1'));
+      ape2 = mayus(d('apellido2'));
     } else if (cli && !vacio(cli.nombre) && !vacio(cli.apellidos)) {
       pila = mayus(cli.nombre);
       const trozos = mayus(cli.apellidos).split(' ').filter(Boolean);
@@ -389,25 +431,62 @@
         }
       }
     } else if (!vacio(nombre)) {
-      avisoNombre = 'el CRM guarda «' + nombre + '» en un solo campo: reparte nombre y apellidos';
+      avisoNombre = 'el CRM guarda «' + nombre + '» en un solo campo y el DNI no se ha leído: '
+        + 'reparte nombre y apellidos';
     }
 
-    const prov = codigoProvincia(cli ? cli.provincia : null);
+    /* --- Sexo · V hombre · H mujer · X persona jurídica ---
+       Solo se acepta uno de los tres códigos. Una empresa es X porque lo es,
+       no porque lo diga un documento. */
+    let sexo = mayus(d('sexo'));
+    if (CONSTANTES.SEXOS.indexOf(sexo) === -1) {
+      sexo = esEmpresa ? CONSTANTES.SEXO_PERSONA_JURIDICA : '';
+    }
+
+    /* --- Domicilio ---
+       El desglose fino (escalera, piso, puerta, letra) SOLO sale del DNI:
+       del texto libre no se saca, porque en «SIETE VIENTOS 39 PBJ» nada
+       distingue una planta de un nombre de calle sin ver el documento. */
+    const dir = {
+      tipoVia: libre.tipoVia,
+      via: mayus(primero(d('via'), libre.via)),
+      numero: mayus(primero(d('via_numero'), libre.numero)),
+      escalera: mayus(d('escalera')),
+      piso: mayus(d('piso')),
+      puerta: mayus(d('puerta')),
+      letra: mayus(d('letra')),
+      restoSinUsar: libre.restoSinUsar,
+      // ¿Hay desglose de verdad, o solo lo que se pudo raspar del texto?
+      delDni: !vacio(d('via'))
+    };
+
+    const provNombre = primero(d('provincia'), cli ? cli.provincia : null);
+    const prov = codigoProvincia(provNombre);
+
+    /* --- Caducidad del DNI ---
+       Un DNI caducado no lo rechaza este exportador: lo AVISA. Quien decide
+       si se puede tramitar con él es el gestor, y para eso necesita verlo
+       antes de importar, no descubrirlo en la ventanilla. */
+    const caducidad = aFecha(d('caducidad_nif'));
+    const caducado = !!(caducidad && hoy && caducidad < hoy);
 
     return {
       esEmpresa,
       nombreCompleto: nombre,
       dni: mayus(nif),
-      sexo: esEmpresa ? CONSTANTES.SEXO_PERSONA_JURIDICA : '',
+      sexo,
       ape1, ape2, pila, avisoNombre,
-      telefono: mayus(leer(exp, prefijo + '_telefono')),
+      nacimiento: fechaDDMMAAAA(d('nacimiento')),
+      caducidadNif: fechaDDMMAAAA(d('caducidad_nif')),
+      caducado,
+      telefono: mayus(d('telefono')),
       dir,
-      municipio: cli ? mayus(cli.ciudad) : '',
-      cp: (cli && !vacio(cli.cp)) ? mayus(cli.cp) : dir.cp,
-      provinciaNombre: cli ? cli.provincia : null,
+      municipio: mayus(primero(d('municipio'), cli ? cli.ciudad : null)),
+      cp: mayus(primero(d('cp'), cli ? cli.cp : null, libre.cp)),
+      provinciaNombre: provNombre || null,
       provincia: prov.codigo,
       provinciaMotivo: prov.motivo,
-      teniaDireccion: !vacio(leer(exp, prefijo + '_direccion')),
+      teniaDireccion: !vacio(d('direccion')) || !vacio(d('via')),
       cliente: cli
     };
   }
@@ -446,10 +525,10 @@
       campo('SIGLAS_DIRECCION' + sufijo, SIGLAS[p.dir.tipoVia] || ''),
       campo('NOMBRE_VIA_DIRECCION' + sufijo, p.dir.via),
       campo('NUMERO_DIRECCION' + sufijo, p.dir.numero),
-      campo('LETRA_DIRECCION' + sufijo, ''),
-      campo('ESCALERA_DIRECCION' + sufijo, ''),
-      campo('PISO_DIRECCION' + sufijo, ''),
-      campo('PUERTA_DIRECCION' + sufijo, '')
+      campo('LETRA_DIRECCION' + sufijo, p.dir.letra),
+      campo('ESCALERA_DIRECCION' + sufijo, p.dir.escalera),
+      campo('PISO_DIRECCION' + sufijo, p.dir.piso),
+      campo('PUERTA_DIRECCION' + sufijo, p.dir.puerta)
     ];
   }
 
@@ -460,14 +539,14 @@
       campo('APELLIDO1_RAZON_SOCIAL_ADQUIRIENTE', p.ape1),
       campo('APELLIDO2_ADQUIRIENTE', p.ape2),
       campo('NOMBRE_ADQUIRIENTE', p.pila),
-      campo('FECHA_NACIMIENTO_ADQUIRIENTE', ''),
+      campo('FECHA_NACIMIENTO_ADQUIRIENTE', p.nacimiento),
       campo('TELEFONO_ADQUIRIENTE', p.telefono)
     ].concat(camposDireccion(p, '_ADQUIRIENTE')).concat([
       campo('PROVINCIA_ADQUIRIENTE', p.provincia),
       campo('MUNICIPIO_ADQUIRIENTE', p.municipio),
       campo('PUEBLO_ADQUIRIENTE', ''),
       campo('CP_ADQUIRIENTE', p.cp),
-      campo('FECHA_CADUCIDAD_NIF_ADQUIRIENTE', ''),
+      campo('FECHA_CADUCIDAD_NIF_ADQUIRIENTE', p.caducidadNif),
       campo('BLOQUE_DIRECCION_ADQUIRIENTE', ''),
       campo('KM_DIRECCION_ADQUIRIENTE', ''),
       campo('HM_DIRECCION_ADQUIRIENTE', ''),
@@ -501,14 +580,14 @@
       campo('APELLIDO1_RAZON_SOCIAL_TRANSMITENTE', p.ape1),
       campo('APELLIDO2_TRANSMITENTE', p.ape2),
       campo('NOMBRE_TRANSMITENTE', p.pila),
-      campo('FECHA_NACIMIENTO_TRANSMITENTE', ''),
+      campo('FECHA_NACIMIENTO_TRANSMITENTE', p.nacimiento),
       campo('TELEFONO_TRANSMITENTE', p.telefono)
     ].concat(camposDireccion(p, '_TRANSMITENTE')).concat([
       campo('PROVINCIA_TRANSMITENTE', p.provincia),
       campo('MUNICIPIO_TRANSMITENTE', p.municipio),
       campo('PUEBLO_TRANSMITENTE', ''),
       campo('CP_TRANSMITENTE', p.cp),
-      campo('FECHA_CADUCIDAD_NIF_TRANSMITENTE', ''),
+      campo('FECHA_CADUCIDAD_NIF_TRANSMITENTE', p.caducidadNif),
       campo('BLOQUE_DIRECCION_TRANSMITENTE', ''),
       campo('KM_DIRECCION_TRANSMITENTE', ''),
       campo('HM_DIRECCION_TRANSMITENTE', ''),
@@ -533,20 +612,25 @@
   /* El presentador es la propia gestoría: mismos datos colegiados que
      firman el mandato y encabezan el expediente del Colegio. */
   function bloquePresentador(g) {
+    /* El domicilio de la gestoría se declara ya desglosado en la config
+       (`via`, `via_numero`, `piso`…), porque se escribe una vez y se sabe
+       cómo se reparte. El parseo del texto libre queda solo de respaldo,
+       para una config antigua que solo tenga `direccion`. */
     const dir = partirDireccion(g.direccion);
+    const tipoVia = g.tipo_via || dir.tipoVia;
     return bloque('DATOS_PRESENTADOR', [
       campo('DNI_PRESENTADOR', mayus(g.nif)),
       campo('APELLIDO1_RAZON_SOCIAL_PRESENTADOR', mayus(g.nombre)),
       campo('APELLIDO2_PRESENTADOR', ''),
       campo('NOMBRE_PRESENTADOR', ''),
       campo('TELEFONO_PRESENTADOR', mayus(g.telefono)),
-      campo('SIGLAS_DIRECCION_PRESENTADOR', SIGLAS[dir.tipoVia] || ''),
-      campo('NOMBRE_VIA_DIRECCION_PRESENTADOR', dir.via),
-      campo('NUMERO_DIRECCION_PRESENTADOR', dir.numero),
-      campo('LETRA_DIRECCION_PRESENTADOR', ''),
-      campo('ESCALERA_DIRECCION_PRESENTADOR', ''),
-      campo('PISO_DIRECCION_PRESENTADOR', ''),
-      campo('PUERTA_DIRECCION_PRESENTADOR', ''),
+      campo('SIGLAS_DIRECCION_PRESENTADOR', SIGLAS[tipoVia] || ''),
+      campo('NOMBRE_VIA_DIRECCION_PRESENTADOR', mayus(primero(g.via, dir.via))),
+      campo('NUMERO_DIRECCION_PRESENTADOR', mayus(primero(g.via_numero, dir.numero))),
+      campo('LETRA_DIRECCION_PRESENTADOR', mayus(g.letra)),
+      campo('ESCALERA_DIRECCION_PRESENTADOR', mayus(g.escalera)),
+      campo('PISO_DIRECCION_PRESENTADOR', mayus(g.piso)),
+      campo('PUERTA_DIRECCION_PRESENTADOR', mayus(g.puerta)),
       campo('PROVINCIA_PRESENTADOR', codigoProvincia(g.provincia).codigo),
       campo('MUNICIPIO_PRESENTADOR', mayus(g.municipio)),
       campo('CP_PRESENTADOR', vacio(g.cp) ? dir.cp : mayus(g.cp)),
@@ -678,11 +762,18 @@
   function construir(exp, opciones) {
     const o = opciones || {};
     const g = Object.assign({}, (global.GT_CONFIG && global.GT_CONFIG.GESTORIA) || {}, o.gestoria || {});
+
+    /* `demo` no es un campo más que se herede al mezclar: dice si los datos
+       de la gestoría son de mentira, y quien los aporta es quien lo sabe. Si
+       la llamada trae su propia gestoría, trae también su propia respuesta.
+       Heredarla del config marcaría como demo un XML bueno — o, peor, al
+       revés: dejar de avisar de que el CIF es inventado. */
+    if (o.gestoria) g.demo = !!o.gestoria.demo;
     const clientes = o.clientes || (exp && exp.cliente ? [exp.cliente] : []);
     const hoy = o.hoy || new Date();
 
-    const adq = parte(exp, 'comprador', clientes);
-    const tra = parte(exp, 'vendedor', clientes);
+    const adq = parte(exp, 'comprador', clientes, hoy);
+    const tra = parte(exp, 'vendedor', clientes, hoy);
 
     const raiz = {
       tag: 'FORMATO_GA',
@@ -736,6 +827,7 @@
       nombre: 'oegam-transferencia-' + (exp.referencia || 'expediente') + '.xml',
       faltan: obligatoriosQueFaltan(raiz),
       pendientes: pendientesDe(adq, tra, g),
+      avisos: avisosDe(adq, tra, g),
       asignaOegam: ASIGNA_OEGAM.slice(),
       constantes: CONSTANTES,
       fueraLatin1: fuera
@@ -755,18 +847,36 @@
       .map(t => ({ tag: t, etiqueta: ETIQUETAS[t] || t }));
   }
 
+  const PARTES_XML = [
+    ['ADQUIRIENTE', 'comprador', 'compradora'],
+    ['TRANSMITENTE', 'vendedor', 'vendedora']
+  ];
+
   /** Lo que el gestor tiene que completar a mano, y por qué. */
   function pendientesDe(adq, tra, g) {
     const out = [];
     const add = (tag, motivo) => out.push({ tag, motivo });
+    const porParte = { ADQUIRIENTE: adq, TRANSMITENTE: tra };
 
-    [['ADQUIRIENTE', adq, 'comprador'], ['TRANSMITENTE', tra, 'vendedor']].forEach(([suf, p, quien]) => {
-      if (!p.esEmpresa) {
-        add('SEXO_' + suf, 'el CRM no guarda el sexo del ' + quien + ': V (varón) o M (mujer)');
-        add('FECHA_NACIMIENTO_' + suf, 'el CRM no guarda la fecha de nacimiento del ' + quien);
+    PARTES_XML.forEach(([suf, quien, quienA]) => {
+      const p = porParte[suf];
+
+      if (vacio(p.sexo)) {
+        add('SEXO_' + suf, 'no se ha leído el sexo del ' + quien
+          + ' en su DNI: V (hombre) o H (mujer)');
+      }
+
+      if (p.esEmpresa) {
+        add('DNI_REPRESENTANTE_' + suf, 'el representante de la empresa ' + quienA
+          + ' no está en el expediente: sale del poder o del mandato');
       } else {
-        add('DNI_REPRESENTANTE_' + suf,
-          'el representante de la empresa ' + quien + 'a no está en el expediente: sale del poder o del mandato');
+        if (vacio(p.nacimiento)) {
+          add('FECHA_NACIMIENTO_' + suf, 'no se ha leído la fecha de nacimiento del '
+            + quien + ' en su DNI (está en el anverso)');
+        }
+        if (vacio(p.caducidadNif)) {
+          add('FECHA_CADUCIDAD_NIF_' + suf, 'no se ha leído la caducidad del DNI del ' + quien);
+        }
       }
       if (p.avisoNombre) add('APELLIDO1_RAZON_SOCIAL_' + suf, p.avisoNombre);
 
@@ -776,25 +886,65 @@
             ? 'tipo de vía detectado «' + p.dir.tipoVia + '»: falta su código en el catálogo OEGAM'
             : 'no se reconoce el tipo de vía en el domicilio del ' + quien);
         }
-        add('PISO_DIRECCION_' + suf,
-          'letra, escalera, piso y puerta no se sacan del domicilio en texto libre');
+        /* Con el DNI leído, el desglose lo pone Gest-IA viendo el documento y
+           no hay nada que avisar. Sin él, lo único que hay es una cadena de
+           texto: se dice, y se enseña lo que quedó suelto detrás del número. */
+        if (!p.dir.delDni) {
+          add('PISO_DIRECCION_' + suf, 'el DNI del ' + quien + ' no se ha leído: piso, puerta, '
+            + 'letra y escalera no se sacan del domicilio en texto libre'
+            + (p.dir.restoSinUsar ? ' (sin repartir: «' + p.dir.restoSinUsar + '»)' : ''));
+        }
       }
       if (vacio(p.municipio)) {
-        add('MUNICIPIO_' + suf, p.cliente
-          ? 'la ficha de cliente del ' + quien + ' no tiene municipio'
-          : 'el ' + quien + ' no está dado de alta como cliente: municipio y provincia salen de su ficha');
+        add('MUNICIPIO_' + suf, 'no se ha leído el municipio del ' + quien
+          + ' (reverso del DNI) ni lo tiene su ficha de cliente');
       }
       if (vacio(p.provincia)) {
         add('PROVINCIA_' + suf, p.provinciaMotivo
-          || 'sin provincia en la ficha del ' + quien);
+          || 'no se ha leído la provincia del ' + quien + ' (reverso del DNI)');
       }
     });
 
-    if (!SIGLAS[partirDireccion(g.direccion).tipoVia]) {
-      add('SIGLAS_DIRECCION_PRESENTADOR', 'falta el catálogo de tipos de vía de OEGAM');
+    const tipoViaGestoria = g.tipo_via || partirDireccion(g.direccion).tipoVia;
+    if (!SIGLAS[tipoViaGestoria]) {
+      add('SIGLAS_DIRECCION_PRESENTADOR', tipoViaGestoria
+        ? 'tipo de vía detectado «' + tipoViaGestoria + '»: falta su código en el catálogo OEGAM'
+        : 'falta el catálogo de tipos de vía de OEGAM');
     }
     add('TARA / PESO_MMA / PLAZAS',
       'van a 0 como en la plantilla: el CRM no los guarda, salen de la ficha técnica');
+
+    return out;
+  }
+
+  /**
+   * Avisos que NO son huecos: cosas rellenas que hay que mirar antes de
+   * importar. Un hueco se ve solo; esto no.
+   */
+  function avisosDe(adq, tra, g) {
+    const out = [];
+    const porParte = { ADQUIRIENTE: adq, TRANSMITENTE: tra };
+
+    PARTES_XML.forEach(([suf, quien]) => {
+      const p = porParte[suf];
+      if (p.caducado) {
+        out.push({
+          tipo: 'dni_caducado',
+          texto: 'El DNI del ' + quien + ' está CADUCADO (' + p.caducidadNif
+            + '). La fecha va en el XML tal cual: decidir si se puede tramitar con él '
+            + 'es cosa tuya, pero no lo descubras en la ventanilla.'
+        });
+      }
+    });
+
+    if (g.demo) {
+      out.push({
+        tipo: 'gestoria_demo',
+        texto: 'Los datos de la gestoría son los de la DEMO: el CIF, el número de '
+          + 'profesional y el teléfono son inventados. Este XML NO se presenta. '
+          + 'Sustitúyelos en GT_CONFIG.GESTORIA y quita `demo: true`.'
+      });
+    }
 
     return out;
   }
