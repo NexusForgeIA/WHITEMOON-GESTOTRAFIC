@@ -40,10 +40,24 @@
     /* Los documentos de identidad dependen de a quién identifican:
        el prefijo del tipo (dni_comprador, cif_vendedor…) da la parte. */
     dni: {
-      nombre:    '{parte}_nombre',
-      apellidos: '{parte}_nombre',      // se concatena con el nombre
+      nombre:    '{parte}_nombre_pila',
+      apellido1: '{parte}_apellido1',
+      apellido2: '{parte}_apellido2',
       numero:    '{parte}_nif',
-      direccion: '{parte}_direccion'
+      sexo:      '{parte}_sexo',
+      fecha_nacimiento: '{parte}_nacimiento',
+      fecha_caducidad:  '{parte}_caducidad_nif',
+      direccion: '{parte}_direccion',
+      // Desglose del domicilio · lo pide OEGAM en campos separados
+      via_nombre:   '{parte}_via',
+      via_numero:   '{parte}_via_numero',
+      via_escalera: '{parte}_escalera',
+      via_piso:     '{parte}_piso',
+      via_puerta:   '{parte}_puerta',
+      via_letra:    '{parte}_letra',
+      municipio: '{parte}_municipio',
+      provincia: '{parte}_provincia',
+      cp:        '{parte}_cp'
     },
     cif: {
       razon_social: '{parte}_nombre',
@@ -52,12 +66,40 @@
     }
   };
 
+  /* Campos del DNI que viven en `datos` y no están en el formulario del
+     trámite. Se completan y se corrigen en la pestaña de exportación, que es
+     donde importan; meterlos en la ficha serían treinta campos más que casi
+     nadie tocaría. */
+  const CAMPOS_PERSONA = [
+    'nombre_pila', 'apellido1', 'apellido2', 'sexo', 'nacimiento', 'caducidad_nif',
+    'via', 'via_numero', 'escalera', 'piso', 'puerta', 'letra',
+    'municipio', 'provincia', 'cp'
+  ];
+
+  /* Sexo · códigos del formato del Colegio, confirmados por la gestoría:
+       V = hombre · H = mujer · X = persona jurídica
+
+     La H de «mujer» es la trampa: se parece a «hombre» y la M que uno
+     escribiría por instinto es justo la del otro. Por eso al modelo se le
+     pide la PALABRA («hombre» / «mujer») y la traducción vive aquí sola,
+     donde se lee de un vistazo y se prueba. Cualquier otra cosa → null. */
+  const SEXO = { hombre: 'V', varon: 'V', mujer: 'H' };
+
+  function sexoDe(valor) {
+    if (!valor) return null;
+    const v = String(valor).normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .toLowerCase().trim();
+    return SEXO[v] || null;
+  }
+
   const RANGO = { alta: 3, media: 2, baja: 1 };
 
   /* Campos que el expediente guarda en `datos` pero que no están en el
      formulario del trámite. Sin esta lista, `proponer` los descartaría por no
      encontrarlos en el catálogo. */
-  const EXTRA = ['fecha_venta', 'tipo_vehiculo'];
+  const EXTRA = ['fecha_venta', 'tipo_vehiculo'].concat(
+    (T.PARTES || ['vendedor', 'comprador']).reduce(
+      (acc, p) => acc.concat(CAMPOS_PERSONA.map(c => p + '_' + c)), []));
 
   /* Clasificación de la ficha técnica → tipo de vehículo del Anexo I.
      Solo lo que se reconoce sin dudar. Un "VEHÍCULO MIXTO ADAPTABLE" o una
@@ -140,17 +182,24 @@
       const mapa = MAPA[doc.perfil];
       if (!mapa) return;
 
-      // Nombre + apellidos van al mismo campo: se juntan antes de proponer.
+      /* El CRM enseña el nombre completo en un solo campo y OEGAM lo quiere
+         partido en tres. Se guardan las DOS formas: las tres piezas tal y
+         como las imprime el DNI, y su unión para lo que ya existía (la ficha,
+         el contrato, el buscador). Unir es seguro; partir es lo que no se
+         hace, y por eso el nombre completo se compone de las piezas leídas y
+         nunca al revés. */
       if (doc.perfil === 'dni' && parte) {
-        const n = doc.campos.nombre || {}, a = doc.campos.apellidos || {};
-        const completo = [n.valor, a.valor].filter(Boolean).join(' ').trim();
-        const conf = RANGO[n.confianza || 'baja'] < RANGO[a.confianza || 'baja'] ? n.confianza : a.confianza;
-        proponer(parte + '_nombre', completo || null, completo ? conf : 'baja', doc.tipo,
-          completo ? (n.nota || a.nota) : 'No se pudo leer el nombre completo');
+        const n = doc.campos.nombre || {};
+        const a1 = doc.campos.apellido1 || {};
+        const a2 = doc.campos.apellido2 || {};
+        const completo = [n.valor, a1.valor, a2.valor].filter(Boolean).join(' ').trim();
+        const peor = [n, a1].reduce((p, c) =>
+          RANGO[c.confianza || 'baja'] < RANGO[p.confianza || 'baja'] ? c : p, n);
+        proponer(parte + '_nombre', completo || null, completo ? peor.confianza : 'baja', doc.tipo,
+          completo ? (n.nota || a1.nota) : 'No se pudo leer el nombre completo');
       }
 
       Object.keys(mapa).forEach(leido => {
-        if (doc.perfil === 'dni' && (leido === 'nombre' || leido === 'apellidos')) return;
         const dato = doc.campos[leido];
         if (!dato) return;
 
@@ -164,6 +213,8 @@
         if (campo === 'combustible') valor = combustible(valor);
         if (campo === 'precio_contrato' || campo === 'cvf') valor = numero(valor);
         if (campo === 'cilindrada') { const n = numero(valor); valor = n === null ? null : Math.round(n); }
+        // «hombre»/«mujer» → V/H. Cualquier otra cosa se descarta.
+        if (/_sexo$/.test(campo)) valor = sexoDe(valor);
 
         proponer(campo, valor, dato.confianza, doc.tipo, dato.nota);
       });
@@ -182,6 +233,13 @@
     const marcarEmpresa = (parte, nota) => {
       if (campos.indexOf(parte + '_tipo') === -1) return;
       out[parte + '_tipo'] = { valor: 'empresa', confianza: 'alta', origen: 'checklist', nota: nota };
+      /* Una persona jurídica es X en el formato del Colegio. No es una
+         lectura del documento sino una consecuencia de que la parte sea una
+         empresa, así que se propone con el mismo origen que el tipo. */
+      out[parte + '_sexo'] = {
+        valor: 'X', confianza: 'alta', origen: 'checklist',
+        nota: 'X = persona jurídica.'
+      };
     };
 
     if (hay('factura_venta', 'cif_vendedor')) {
@@ -279,6 +337,8 @@
     propuestas: propuestas,
     aExpediente: aExpediente,
     huecos: huecos,
-    avisosCaras: avisosCaras
+    avisosCaras: avisosCaras,
+    CAMPOS_PERSONA: CAMPOS_PERSONA,
+    sexoDe: sexoDe
   };
 })(window);

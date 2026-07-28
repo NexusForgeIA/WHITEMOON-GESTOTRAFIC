@@ -32,8 +32,20 @@
     return isNaN(+d) ? '____________' : d.toLocaleDateString('es-ES');
   }
 
+  /* Fecha que LLEVA el contrato. Es la de la operación si el expediente ya
+     la tiene (la leyó Gest-IA del contrato o la puso el gestor); si no, la de
+     hoy, porque el documento se firma hoy.
+
+     De aquí sale FECHA_CONTRATO del XML de OEGAM, así que no puede ser un
+     "hoy" recalculado en cada visita: cuando el contrato se guarda en el
+     expediente, la fecha se guarda con él. */
+  function fechaDelContrato(exp) {
+    return (exp && exp.datos && exp.datos.fecha_venta) || null;
+  }
+
   function construirHTML(exp) {
     var hoy = fechaLarga(null);
+    var fechaDoc = fechaLarga(fechaDelContrato(exp));
     var precio = exp.precio_contrato;
 
     return '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">' +
@@ -70,7 +82,7 @@
       '<div class="sub">Expediente ' + esc(exp.referencia) + ' · Documento generado el ' + hoy + '</div>' +
 
       '<p>En ' + esc(exp.lugar_firma || global.GT_CONFIG.GESTORIA.ciudad) +
-      ', a ' + hoy + ', <b>REUNIDOS</b> de una parte el vendedor y de otra el comprador que a ' +
+      ', a ' + fechaDoc + ', <b>REUNIDOS</b> de una parte el vendedor y de otra el comprador que a ' +
       'continuación se identifican, ambos con capacidad legal suficiente para contratar y obligarse, ' +
       'convienen el presente contrato de compraventa.</p>' +
 
@@ -279,10 +291,31 @@
     setTimeout(() => URL.revokeObjectURL(url), 1500);
   }
 
+  /** Nombre del archivo del contrato de un expediente. */
+  function nombreContrato(exp) {
+    return 'contrato-compraventa-' + ((exp && exp.referencia) || 'expediente') + '.html';
+  }
+
+  /**
+   * El contrato como ARCHIVO, listo para subir al expediente.
+   *
+   * Es el mismo `construirHTML` de siempre: el contrato que se guarda y el
+   * que se descarga son literalmente el mismo documento, no dos versiones
+   * que se puedan separar.
+   */
+  function archivoContrato(exp) {
+    return new File([construirHTML(exp)], nombreContrato(exp), {
+      type: 'text/html;charset=utf-8'
+    });
+  }
+
   global.GTContrato = {
     abrir: abrirContrato,
     descargar: descargarContrato,
     html: construirHTML,
+    archivo: archivoContrato,
+    nombre: nombreContrato,
+    fecha: fechaDelContrato,
     abrirComunicacion: (exp) => abrirEnPestana(construirComunicacion(exp)),
     descargarComunicacion: (exp) => descargarHTML(
       construirComunicacion(exp),

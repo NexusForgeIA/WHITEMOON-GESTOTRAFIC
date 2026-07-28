@@ -194,15 +194,31 @@ Se verifica contra la plantilla de referencia:
 node tools/verificar-oegam.js
 ```
 
-Funciona, pero **le faltan dos tablas oficiales que solo puede dar la
-gestoría**. Mientras no lleguen, esos campos salen VACÍOS y marcados en el
-informe del panel — que es lo correcto, no un fallo:
+Con los DNIs de comprador y vendedor leídos a dos caras, el XML sale completo.
+**Le faltan dos tablas oficiales que solo puede dar la gestoría**. Mientras no
+lleguen, esos campos salen VACÍOS y marcados en el informe del panel — que es
+lo correcto, no un fallo:
 
 1. **Tipos de vía** → los códigos de `SIGLAS_DIRECCION_*`. La plantilla pone
    `41` hasta en una vía llamada «VIA EJEMPLO», así que ahí `41` es relleno.
    **No se deduce la tabla de eso.** Se carga en la constante `SIGLAS`.
 2. **Baleares, Girona y Ourense**, con dos códigos provinciales históricos
    cada una (`PM`/`IB`, `GI`/`GE`, `OU`/`OR`). Los otros 49 sí están.
+
+> ⚠️ **La gestoría de `GT_CONFIG.GESTORIA` es la de la DEMO**: CIF, número de
+> profesional y teléfono son inventados y van marcados con `demo: true`, que
+> hace saltar un aviso en la pestaña de exportación. Al instalar en una
+> gestoría real, sustitúyelos y quita la bandera.
+
+> **Sexo: V hombre · H mujer · X persona jurídica.** La de mujer es **H, no M**
+> —y el DNI español imprime `M` de *masculino*, que es justo la confusión—. Por
+> eso a Gest-IA se le pide la palabra («hombre»/«mujer») y la traducción vive
+> solo en `gestia.js`.
+
+> Tocar el perfil `dni` de `gestia-extraer` obliga a mirar el **presupuesto de
+> uniones**: la API admite 16 `anyOf` por esquema y pasarse devuelve 400,
+> tumbando TODA lectura de DNI sin previo aviso. Van 11; el verificador lo
+> cuenta. Y hay que **desplegar** la función para que el cambio surta efecto.
 
 Y hay un tercer punto, que no bloquea: las **constantes copiadas verbatim**
 de la plantilla (`TIPO_ID_VEHICULO` = 40, `MODO_ADJUDICACION` = 1,

@@ -53,7 +53,18 @@ const json = (body: unknown, status = 200) =>
 
 /* ---------------- Qué se extrae de cada tipo de documento ---------------- */
 
-type Campo = { etiqueta: string; pista: string };
+/* `simple: true` → el campo NO es nullable en el esquema: se pide como cadena
+   y "" significa «no está o no lo he leído».
+
+   No es una excepción a la regla anti-invención, es lo que permite cumplirla.
+   La API limita a 16 los parámetros con unión (`anyOf`) por esquema, y un
+   `valor` nullable gasta uno. El DNI necesita 17 campos, así que los seis del
+   DESGLOSE de la vía (número, piso, letra, escalera, puerta) van como cadena:
+   son detalle estructural de una dirección que además se devuelve entera y
+   verbatim en `direccion`, con su propia confianza. Lo que de verdad decide
+   —nombre, apellidos, número de DNI, sexo, fechas, municipio, provincia, CP—
+   sigue siendo nullable, que es donde `null` significa «no me lo inventes». */
+type Campo = { etiqueta: string; pista: string; simple?: boolean };
 type Cara = { id: string; label: string; contiene: string };
 
 const PERFILES: Record<string, {
@@ -68,18 +79,44 @@ const PERFILES: Record<string, {
        al modelo que diga cuáles ha visto, y poder avisar de la que falta en
        lugar de dejar el domicilio en blanco sin explicación. */
     caras: [
-      { id: 'anverso', label: 'anverso', contiene: 'fotografía, nombre, apellidos y número de documento' },
-      { id: 'reverso', label: 'reverso', contiene: 'domicilio, lugar de nacimiento y filiación' }
+      { id: 'anverso', label: 'anverso', contiene: 'fotografía, nombre, apellidos, sexo, fecha de nacimiento, fecha de caducidad y número de documento' },
+      { id: 'reverso', label: 'reverso', contiene: 'domicilio, municipio, provincia, código postal, lugar de nacimiento y filiación' }
     ],
     campos: {
       nombre:    { etiqueta: 'Nombre de pila',   pista: 'Solo el nombre, sin apellidos. Está en el anverso.' },
-      apellidos: { etiqueta: 'Apellidos',        pista: 'Los dos apellidos, en su orden. Están en el anverso.' },
+      /* Los dos apellidos van SEPARADOS porque el DNI los imprime separados.
+         Pedirlos juntos obligaría luego a partir «DE LA FUENTE RUIZ» por un
+         espacio, que es exactamente la clase de suposición que aquí no se
+         hace. Si el documento solo trae uno, el segundo es null. */
+      apellido1: { etiqueta: 'Primer apellido',  pista: 'SOLO el primer apellido, tal y como lo imprime el documento. Un apellido compuesto («DE LA FUENTE», «SAN JOSE») es UN apellido: devuélvelo entero.' },
+      apellido2: { etiqueta: 'Segundo apellido', pista: 'SOLO el segundo apellido. Si el documento no tiene segundo apellido (habitual en NIE y extranjeros), devuelve null.' },
       numero:    { etiqueta: 'Número de DNI/NIE', pista: '8 dígitos + letra (DNI) o X/Y/Z + 7 dígitos + letra (NIE). Copia la letra tal cual aparece. Está en el anverso.' },
-      direccion: { etiqueta: 'Domicilio',        pista: 'Está en el REVERSO. Si no tienes el reverso a la vista, devuelve null: no lo deduzcas de ningún otro documento.' },
+      /* Se pide la PALABRA, no la letra del documento. El DNI español imprime
+         «M» de masculino y «F» de femenino, y el formato del Colegio usa
+         V/H/X: pedir la letra directamente invita a copiar la «M» del DNI y
+         cruzarla con la «M» de mujer. La traducción a V/H se hace en el
+         cliente, donde es una tabla de dos entradas que se lee de un vistazo. */
+      sexo:      { etiqueta: 'Sexo',             pista: 'Responde exactamente «hombre» o «mujer», en minúsculas y como palabra. NO copies la letra del documento (el DNI pone M de masculino y F de femenino, y se confunde con M de mujer). Si no lo lees con claridad, devuelve null.' },
+      fecha_nacimiento: { etiqueta: 'Fecha de nacimiento', pista: 'Está en el ANVERSO. Devuélvela en formato AAAA-MM-DD. Ojo: no la confundas con la fecha de expedición ni con la de caducidad.' },
+      fecha_caducidad:  { etiqueta: 'Fecha de caducidad',  pista: 'La fecha de VALIDEZ o CADUCIDAD del documento, en el anverso. Formato AAAA-MM-DD. No la confundas con la de nacimiento ni con la de expedición.' },
+      direccion: { etiqueta: 'Domicilio',        pista: 'La línea del domicilio ENTERA y verbatim, tal y como está impresa. Está en el REVERSO. Si no tienes el reverso a la vista, devuelve null: no lo deduzcas de ningún otro documento.' },
+
+      /* Desglose de la vía. Lo hace el modelo, que está viendo el documento,
+         y no una expresión regular sobre texto libre: en «SIETE VIENTOS 39
+         PBJ» un regex no sabe si «PBJ» es parte del nombre de la calle. */
+      via_nombre:   { etiqueta: 'Nombre de la vía', simple: true, pista: 'SOLO el nombre de la calle, SIN el tipo de vía (CALLE, AVENIDA, PLAZA…) y SIN el número ni el piso. De «C/ SIETE VIENTOS 39 PBJ» el nombre de la vía es «SIETE VIENTOS». Cadena vacía si no lo distingues.' },
+      via_numero:   { etiqueta: 'Número de la vía', simple: true, pista: 'El número del portal, solo el número. Cadena vacía si no aparece.' },
+      via_escalera: { etiqueta: 'Escalera',        simple: true, pista: 'Solo si aparece explícitamente («ESC», «ESCALERA»). Cadena vacía si no.' },
+      via_piso:     { etiqueta: 'Piso',            simple: true, pista: 'La planta: «2», «BJ», «PBJ», «ENTLO»… Cópiala tal cual. Cadena vacía si no aparece.' },
+      via_puerta:   { etiqueta: 'Puerta',          simple: true, pista: 'La puerta: «B», «IZQ», «DCHA», «2»… Cadena vacía si no aparece.' },
+      via_letra:    { etiqueta: 'Letra del portal', simple: true, pista: 'La letra que acompaña al NÚMERO DEL PORTAL («13 B» → letra B), no la de la puerta. Cadena vacía si no aparece o si dudas de cuál de las dos es.' },
+
+      municipio: { etiqueta: 'Municipio del domicilio', pista: 'El municipio del DOMICILIO actual, en el reverso. No el de nacimiento. Si no distingues cuál es cuál, devuelve null.' },
       /* De aquí sale la CCAA con la que se liquida el ITP, así que la
          confusión clásica del reverso —provincia de nacimiento vs. provincia
          del domicilio— cambiaría el impuesto. Ante la duda, null. */
-      provincia: { etiqueta: 'Provincia del domicilio', pista: 'La provincia del DOMICILIO actual, no la de nacimiento: en el reverso aparecen las dos y se confunden con facilidad. Solo el nombre de la provincia. Si no distingues cuál es cuál, devuelve null.' }
+      provincia: { etiqueta: 'Provincia del domicilio', pista: 'La provincia del DOMICILIO actual, no la de nacimiento: en el reverso aparecen las dos y se confunden con facilidad. Solo el nombre de la provincia. Si no distingues cuál es cuál, devuelve null.' },
+      cp:        { etiqueta: 'Código postal',     pista: 'Los cinco dígitos del código postal del domicilio. Si no aparece, devuelve null: NO lo deduzcas del municipio.' }
     }
   },
   cif: {
@@ -167,7 +204,8 @@ function esquema(perfil: string) {
     props[nombre] = {
       type: 'object',
       properties: {
-        valor: nulable('string'),
+        // Los `simple` no gastan del presupuesto de 16 uniones: "" es su hueco.
+        valor: campos[nombre].simple ? { type: 'string' } : nulable('string'),
         confianza: { type: 'string', enum: ['alta', 'media', 'baja'] },
         nota: { type: 'string' }
       },
@@ -243,6 +281,7 @@ Por eso:
 - Si un dato NO aparece en el documento, devuelve valor null.
 - Si aparece pero no lo lees con total claridad (borroso, cortado, tapado, ambiguo), devuelve valor null y confianza "baja". NO adivines, NO completes, NO deduzcas a partir de otros campos.
 - No rellenes un campo con un valor "plausible" ni con un ejemplo. Antes null que aproximado.
+- Unos pocos campos del esquema no admiten null: en ellos el hueco es la cadena vacía "". Vale exactamente lo mismo — vacío antes que aproximado.
 
 Confianza:
 - "alta": el dato se lee nítido y sin ambigüedad posible.

@@ -1071,7 +1071,7 @@
       itp: () => panelITP(exp, cont),
       datos: () => panelDatos(exp, tr, cont),
       docs: () => panelDocs(exp, tr, docs, cont),
-      genera: () => panelGenera(exp, tr, cont),
+      genera: () => panelGenera(exp, tr, docs, cont),
       oegam: () => panelOegam(exp, tr, cont)
     };
     paneles[pestanas[0].id]();
@@ -1087,11 +1087,57 @@
         await GTApi.actualizarExpediente(id, { estado: nuevo });
         exp.estado = nuevo;
         toast('Estado actualizado: ' + estadoInfo(nuevo).label, 'ok');
+
+        /* Al pasar a tramitación es cuando el expediente tiene que estar
+           completo, así que es cuando se genera el contrato si falta. */
+        if (nuevo === 'tramitacion') {
+          const hecho = await asegurarContrato(exp, tr, docs);
+          if (hecho) {
+            toast('Contrato de compraventa generado y guardado en el expediente', 'ok');
+            paneles[view.querySelector('#tabs .tab.active').dataset.tab]();
+          }
+        }
       })
     );
 
     const btnDel = view.querySelector('#btn-borrar-exp');
     if (btnDel) btnDel.addEventListener('click', () => confirmarBorrado(exp, docs));
+  }
+
+  /* ---------- Contrato de compraventa · generado y guardado ----------
+     Un expediente que entra en tramitación sin contrato es un expediente
+     que se para. Como el CRM ya tiene todo lo que el contrato necesita, se
+     genera con los datos del expediente y se guarda en su checklist.
+
+     ANTI-INVENCIÓN: el generador no rellena huecos. Un dato que el
+     expediente no tiene sale como una línea de guiones en el documento, que
+     es lo que ve el gestor al revisarlo. Este contrato es un BORRADOR con
+     fecha: lo firman las partes, no el CRM.
+
+     Solo aplica cuando vende un particular. Si vende una empresa, el negocio
+     se documenta con SU factura y el checklist pide esa, no un contrato de
+     compraventa que nadie va a firmar. */
+  async function asegurarContrato(exp, tr, docs) {
+    if (tr.genera !== 'contrato' || T.esVendedorEmpresa(exp)) return false;
+    if (docs.some(d => d.tipo === 'contrato')) return false;
+
+    /* La fecha del contrato es la de la operación si ya se conoce y, si no,
+       la de hoy: es la fecha que lleva el documento que se acaba de crear, no
+       una fecha supuesta. Se guarda con él para que no se recalcule en cada
+       visita — de aquí sale FECHA_CONTRATO del XML de OEGAM. */
+    if (!T.leer(exp, 'fecha_venta')) {
+      const datos = Object.assign({}, exp.datos || {}, {
+        fecha_venta: new Date().toISOString().slice(0, 10)
+      });
+      await GTApi.actualizarExpediente(exp.id, { datos });
+      exp.datos = datos;
+    }
+
+    await GTApi.subirDocumento(exp.id, 'contrato', GTContrato.archivo(exp), 'completo');
+
+    const nuevos = await GTApi.listarDocumentos(exp.id);
+    docs.length = 0; nuevos.forEach(d => docs.push(d));
+    return true;
   }
 
   /** ¿Puede este usuario borrar este expediente? Admin, cualquiera; gestor,
@@ -2266,8 +2312,9 @@
   }
 
   /* ---------- Panel: documento generado ---------- */
-  function panelGenera(exp, tr, cont) {
+  function panelGenera(exp, tr, docs, cont) {
     const esContrato = tr.genera === 'contrato';
+    const yaGuardado = esContrato && docs.some(d => d.tipo === 'contrato');
     const titulo = esContrato ? 'Contrato de compraventa pre-rellenado' : 'Comunicación de venta pre-rellenada';
 
     const faltan = [];
@@ -2316,10 +2363,22 @@
         <div class="row-actions">
           <button class="btn" id="btn-generar">Generar ${esContrato ? 'contrato' : 'comunicación'}</button>
           <button class="btn btn-ghost" id="btn-generar-dl">Descargar .html</button>
+          ${esContrato && !T.esVendedorEmpresa(exp)
+            ? `<button class="btn btn-ghost" id="btn-generar-guardar" ${yaGuardado ? 'disabled' : ''}>${yaGuardado
+                ? 'Ya guardado en el expediente' : 'Guardar en el expediente'}</button>`
+            : ''}
         </div>
+
+        ${esContrato && !T.esVendedorEmpresa(exp) && !yaGuardado ? `
+        <p class="t-muted" style="font-size:.76rem;margin:14px 0 0">
+          Al pasar el expediente a <b>tramitación</b> esto se hace solo: si no hay contrato,
+          se genera con los datos de arriba y se guarda en <b>Documentación</b>. La fecha que
+          lleve el contrato es la que va al XML de OEGAM como <span class="t-mono">FECHA_CONTRATO</span>.
+        </p>` : ''}
 
         <p class="t-muted" style="font-size:.76rem;margin-bottom:0;margin-top:16px">
           En la ventana del documento, usa <b>Imprimir → Guardar como PDF</b> para obtener el archivo firmable.
+          El contrato es un <b>borrador</b>: lo revisan y lo firman las partes.
         </p>
       </div>`;
 
@@ -2332,6 +2391,21 @@
       esContrato ? GTContrato.descargar(exp) : GTContrato.descargarComunicacion(exp);
       toast('Documento descargado', 'ok');
     });
+
+    const btnGuardar = cont.querySelector('#btn-generar-guardar');
+    if (btnGuardar) btnGuardar.addEventListener('click', async () => {
+      btnGuardar.disabled = true;
+      btnGuardar.innerHTML = '<span class="spinner"></span> Guardando…';
+      try {
+        const hecho = await asegurarContrato(exp, tr, docs);
+        toast(hecho ? 'Contrato guardado en el expediente' : 'El expediente ya tenía contrato', 'ok');
+        panelGenera(exp, tr, docs, cont);
+      } catch (err) {
+        toast(err.message || 'No se pudo guardar el contrato', 'err');
+        btnGuardar.disabled = false;
+        btnGuardar.textContent = 'Guardar en el expediente';
+      }
+    });
   }
 
   /* ---------- Panel: exportar a OEGAM (XML del Colegio de Madrid) ----------
@@ -2339,12 +2413,56 @@
      están en el expediente cargado, así que no hay Edge Function, no se
      escribe en el bucket y no queda ningún huérfano que alguien tenga que
      ir a borrar. El archivo solo existe en la descarga del gestor. */
+  /* Los campos de persona que pide OEGAM y que el CRM no tenía: los rellena
+     Gest-IA leyendo el DNI a dos caras, y se corrigen aquí.
+
+     Van en esta pestaña y no en la ficha a propósito. Son treinta campos
+     entre las dos partes, casi siempre ya rellenos por Gest-IA, y solo
+     importan al exportar: en el formulario del trámite serían tres pantallas
+     de scroll que nadie mira. Aquí están donde el informe dice qué falta. */
+  const CAMPOS_OEGAM = [
+    { n: 'nombre_pila',   l: 'Nombre',            t: 'text' },
+    { n: 'apellido1',     l: 'Primer apellido',   t: 'text' },
+    { n: 'apellido2',     l: 'Segundo apellido',  t: 'text' },
+    {
+      n: 'sexo', l: 'Sexo', t: 'select',
+      op: [
+        { v: '',  l: '— Sin determinar —' },
+        { v: 'V', l: 'V · Hombre' },
+        { v: 'H', l: 'H · Mujer' },
+        { v: 'X', l: 'X · Persona jurídica' }
+      ]
+    },
+    { n: 'nacimiento',    l: 'Fecha de nacimiento', t: 'date' },
+    { n: 'caducidad_nif', l: 'Caducidad del DNI',   t: 'date' },
+    { n: 'via',           l: 'Nombre de la vía',    t: 'text', ph: 'SIETE VIENTOS' },
+    { n: 'via_numero',    l: 'Número',              t: 'text', ph: '39' },
+    { n: 'letra',         l: 'Letra del portal',    t: 'text' },
+    { n: 'escalera',      l: 'Escalera',            t: 'text' },
+    { n: 'piso',          l: 'Piso',                t: 'text', ph: 'PBJ' },
+    { n: 'puerta',        l: 'Puerta',              t: 'text' },
+    { n: 'municipio',     l: 'Municipio',           t: 'text' },
+    { n: 'provincia',     l: 'Provincia',           t: 'text', ph: 'Madrid' },
+    { n: 'cp',            l: 'Código postal',       t: 'text', ph: '28220' }
+  ];
+
   function panelOegam(exp, tr, cont) {
     const r = GTOegam.construir(exp, { clientes: fichas });
     const exento = T.esExentoITP(exp);
 
     const filas = (lista) => lista.map(x => `
       <li><span class="t-mono">${h(x.tag)}</span> · ${h(x.motivo || x.etiqueta || '')}</li>`).join('');
+
+    /* Un bloque de campos por parte. Los nombres llevan el prefijo de la
+       parte, que es exactamente la clave con la que viven en `datos`. */
+    const bloquePersona = (prefijo, titulo) => `
+      <div class="form-sec">${h(titulo)}</div>
+      <div class="form-grid">
+        ${CAMPOS_OEGAM.map(c => campoHTML(
+          Object.assign({}, c, { n: prefijo + '_' + c.n }),
+          T.leer(exp, prefijo + '_' + c.n)
+        )).join('')}
+      </div>`;
 
     cont.innerHTML = `
       <div class="card" style="max-width:880px">
@@ -2371,6 +2489,11 @@
               ? 'lo marcó el gestor en la pestaña de ITP'
               : 'sin exención confirmada'})</small></dd>
         </dl>
+
+        ${r.avisos.map(a => `<div class="regul-note" style="margin-bottom:14px">
+          ${svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>')}
+          <div>${h(a.texto)}</div>
+        </div>`).join('')}
 
         ${r.faltan.length ? `<div class="regul-note" style="margin-bottom:14px">
           ${svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>')}
@@ -2400,6 +2523,21 @@
             plataforma al importar. GestoTrafic no los inventa.</p>
         </details>
 
+        <details class="gt-detalle" ${r.faltan.length || r.pendientes.length > 3 ? 'open' : ''}>
+          <summary><b>Datos de las personas</b> · lo que Gest-IA leyó de los DNI</summary>
+          <form id="form-oegam" style="margin-top:12px">
+            ${bloquePersona('comprador', 'Adquiriente · ' + (exp.comprador_nombre || 'comprador'))}
+            ${bloquePersona('vendedor', 'Transmitente · ' + (exp.vendedor_nombre || 'vendedor'))}
+            <div class="row-actions" style="margin-top:12px">
+              <button type="submit" class="btn btn-sm" id="btn-oegam-guardar">Guardar estos datos</button>
+            </div>
+            <p style="margin:12px 0 0">
+              Lo que no se leyó del DNI se queda en blanco: <b>en blanco se ve, y un dato
+              aproximado no</b>. Complétalo mirando el documento, no de memoria.
+            </p>
+          </form>
+        </details>
+
         <div class="row-actions">
           <button class="btn" id="btn-oegam">Exportar a OEGAM (XML)</button>
           <button class="btn btn-ghost" id="btn-oegam-ver">Ver el XML</button>
@@ -2412,6 +2550,36 @@
           No se guarda copia en ningún sitio: el archivo solo existe en tu descarga.
         </p>
       </div>`;
+
+    cont.querySelector('#form-oegam').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const form = ev.target;
+      const btn = form.querySelector('#btn-oegam-guardar');
+
+      /* Todo esto vive en `datos` (jsonb): son campos sin columna propia, así
+         que no hay migración que aplicar ni columna que se quede a medias. */
+      const datos = Object.assign({}, exp.datos || {});
+      ['comprador', 'vendedor'].forEach(p => CAMPOS_OEGAM.forEach(c => {
+        const campo = p + '_' + c.n;
+        const el = form.querySelector('[name="' + campo + '"]');
+        if (!el) return;
+        const v = (el.value || '').trim();
+        if (v) datos[campo] = v; else delete datos[campo];
+      }));
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Guardando…';
+      try {
+        await GTApi.actualizarExpediente(exp.id, { datos });
+        exp.datos = datos;
+        toast('Datos de OEGAM guardados', 'ok');
+        panelOegam(exp, tr, cont);            // el informe se recalcula entero
+      } catch (err) {
+        toast(err.message || 'No se pudieron guardar', 'err');
+        btn.disabled = false;
+        btn.textContent = 'Guardar estos datos';
+      }
+    });
 
     cont.querySelector('#btn-oegam').addEventListener('click', () => {
       const salida = GTOegam.descargar(exp, { clientes: fichas });
