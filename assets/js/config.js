@@ -39,14 +39,35 @@ window.GT_CONFIG = {
      orden que exige la política del bucket. */
   FN_BORRAR_EXPEDIENTE: 'gestotrafic-borrar-expediente',
 
-  // Datos de la gestoría que aparecen en el contrato generado
+  /* Colegio cuyo formato de exportación se usa. Hoy solo hay uno; el
+     exportador (assets/js/oegam.js) está aislado para que añadir otro sea
+     añadir un módulo, no tocar la ficha del expediente. */
+  EXPORTACION: 'oegam',
+
+  /* Datos de la gestoría.
+     Los cuatro primeros salen en el contrato y en la portada del expediente
+     completo. Los demás los pide el XML de OEGAM (DATOS_GESTORIA y
+     DATOS_PRESENTADOR) y son EXACTAMENTE los mismos datos colegiados que
+     firman el mandato.
+
+     Van VACÍOS a propósito, igual que `num_colegiado`: el CIF, el número de
+     profesional, el teléfono y el domicilio de la gestoría los aporta ella.
+     Rellenarlos a ojo pondría un NIF falso en un documento que se presenta
+     ante la DGT. Sin ellos el XML se genera igual, con esos tags vacíos y
+     señalados en el informe de exportación. */
   GESTORIA: {
     nombre: 'GestoTrafic · Gestoría de Tráfico',
     ciudad: 'Majadahonda, Madrid',
     provincia: 'Madrid',
     /* Número de colegiado de la gestoría. Se imprime en la portada del
-       expediente completo; vacío, no se imprime. NO se inventa. */
-    num_colegiado: ''
+       expediente completo y va en <PROFESIONAL>; vacío, no se imprime. */
+    num_colegiado: '',
+    // --- Solo para la exportación a OEGAM ---
+    nif: '',            // <NIF> y <DNI_PRESENTADOR>
+    telefono: '',       // <TELEFONO_PRESENTADOR>
+    direccion: '',      // se descompone en vía / número
+    municipio: '',      // <MUNICIPIO_PRESENTADOR>
+    cp: ''              // <CP_PRESENTADOR>
   }
 };
 

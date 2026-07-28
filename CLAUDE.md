@@ -5,7 +5,7 @@ Pages, con Supabase detrás (proyecto `mlaqtniujnvfxcvcourm`).
 
 Documentación funcional en [`docs/`](docs/): [FASE-1](docs/FASE-1.md) ·
 [TRAMITES](docs/TRAMITES.md) · [USUARIOS](docs/USUARIOS.md) ·
-[GEST-IA](docs/GEST-IA.md).
+[GEST-IA](docs/GEST-IA.md) · [OEGAM](docs/OEGAM.md).
 
 ---
 
@@ -178,6 +178,40 @@ Casos de referencia verificados (Orden HAC/1501/2025):
 Si además tocas las **tablas** de `gestotrafic-itp`, compáralas valor a valor
 con las de producción antes de desplegar: un dígito mal transcrito en la
 depreciación no lo detecta ningún caso suelto.
+
+---
+
+---
+
+## Exportación a OEGAM · dos catálogos pendientes
+
+La ficha de transferencia genera el XML **FORMATO_GA** que la gestoría
+importa en el programa del Colegio de Madrid
+([`assets/js/oegam.js`](assets/js/oegam.js), doc en [`docs/OEGAM.md`](docs/OEGAM.md)).
+Se verifica contra la plantilla de referencia:
+
+```bash
+node tools/verificar-oegam.js
+```
+
+Funciona, pero **le faltan dos tablas oficiales que solo puede dar la
+gestoría**. Mientras no lleguen, esos campos salen VACÍOS y marcados en el
+informe del panel — que es lo correcto, no un fallo:
+
+1. **Tipos de vía** → los códigos de `SIGLAS_DIRECCION_*`. La plantilla pone
+   `41` hasta en una vía llamada «VIA EJEMPLO», así que ahí `41` es relleno.
+   **No se deduce la tabla de eso.** Se carga en la constante `SIGLAS`.
+2. **Baleares, Girona y Ourense**, con dos códigos provinciales históricos
+   cada una (`PM`/`IB`, `GI`/`GE`, `OU`/`OR`). Los otros 49 sí están.
+
+Y hay un tercer punto, que no bloquea: las **constantes copiadas verbatim**
+de la plantilla (`TIPO_ID_VEHICULO` = 40, `MODO_ADJUDICACION` = 1,
+`TARA`/`PESO_MMA`/`PLAZAS` = 0…). Están todas juntas en `CONSTANTES` para
+confirmarlas de una vez.
+
+> `EXENTO_ITP` sale del toggle «Operación con factura» que marca el gestor en
+> la pestaña de ITP. **No** de que el vendedor sea una empresa: eso la
+> pestaña se limita a avisarlo, y confirmarlo es cosa de una persona.
 
 ---
 

@@ -1079,3 +1079,30 @@ tbody tr.clickable:hover { background: rgba(124, 77, 255, .07); }
   body::before, .demo-seal, .sidebar, .tabs, .page-head, .wm-foot { display: none !important; }
   .main { padding: 0; }
 }
+
+/* Bloque plegable · desglose largo dentro de un panel.
+   Mismo lenguaje visual que .empresa-note pero en <details>: la lista de
+   campos de una exportación son veinte líneas y no deben tapar el botón.
+   `display:block` a propósito — un <details> en flex rompe el propio widget
+   de despliegue y deja el resumen y el contenido en paralelo. */
+.gt-detalle {
+  display: block;
+  padding: 12px 15px;
+  margin-bottom: 14px;
+  background: rgba(124, 77, 255, .07);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: .78rem;
+  color: var(--muted);
+}
+.gt-detalle > summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--muted);
+}
+.gt-detalle > summary::-webkit-details-marker { display: none; }
+.gt-detalle > summary::before { content: '▸  '; color: var(--p2); }
+.gt-detalle[open] > summary::before { content: '▾  '; }
+.gt-detalle > summary:hover { color: var(--text); }
+.gt-detalle b { color: var(--text); }
+.gt-detalle .t-mono { color: var(--p2); }

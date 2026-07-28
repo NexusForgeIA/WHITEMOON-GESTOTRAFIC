@@ -180,11 +180,20 @@
       icono: ICO.coche,
       calculo: 'itp',
       genera: 'contrato',
+      /* Formato en el que se exporta para el programa del Colegio. Hoy solo
+         está OEGAM (Madrid) y solo para transferencias; el exportador vive
+         en assets/js/oegam.js y no lo conoce nadie más que esta línea. */
+      exporta: 'oegam',
       secciones: [
         {
           t: 'Datos del vehículo',
           campos: [
             marca, modelo, matricula,
+            /* Sin columna propia: vive en `datos`. Lo pide el XML de OEGAM
+               (<NUMERO_BASTIDOR>) y Gest-IA ya lo lee de la ficha técnica,
+               pero hasta ahora la transferencia no lo declaraba y la
+               propuesta se descartaba por no ser un campo del trámite. */
+            { n: 'bastidor', l: 'Nº de bastidor (VIN)', t: 'text', ph: 'VSSZZZ1KZAW000000' },
             { n: 'fecha_matriculacion', l: 'Fecha 1ª matriculación', t: 'date', col: 1, req: 1 },
             combustible,
             { n: 'cilindrada', l: 'Cilindrada (c.c.)', t: 'number', col: 1, ph: '1498' },
@@ -207,6 +216,12 @@
           t: 'Fiscalidad',
           campos: [
             { n: 'ccaa', l: 'CCAA del comprador', t: 'select', col: 1, req: 1, op: global.GT_CCAA, def: 'Comunidad de Madrid' },
+            /* Fecha de la transmisión. Es la que Gest-IA lee del contrato o
+               de la factura, y la que OEGAM pide en <FECHA_CONTRATO>. Se
+               llama `fecha_venta` porque es el campo que ya existía —el
+               mismo que usa la notificación de venta—, y así la extracción
+               de Gest-IA sigue cayendo donde caía. */
+            { n: 'fecha_venta', l: 'Fecha del contrato o factura', t: 'date' },
             { n: 'valor_boe', l: 'Valor BOE Anexo I (€)', t: 'number', paso: '0.01', col: 1, ph: '21000' },
             { n: 'precio_contrato', l: 'Precio de contrato (€)', t: 'number', paso: '0.01', col: 1, ph: '8500' }
           ]
