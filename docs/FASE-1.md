@@ -168,7 +168,63 @@ queda en 0 y el total se reduce a la tasa DGT (mismo caso: 395,70 € → 55,70 
 `calculo_json` conserva íntegro el resultado del motor, así que la exención es
 auditable y reversible. Detalle en [`TRAMITES.md`](TRAMITES.md).
 
-### 5 bis · Honorarios y total al cliente
+### 5 · bis · Cambio de servicio y bloqueo por clasificación
+
+Un vehículo que ha estado dado de alta como **VTC** o como **alquiler sin
+conductor** no se transfiere a particular sin más: su **ficha técnica** lleva
+otro código de clasificación y hay que pasar por la **ITV** a cambiarlo antes.
+
+La transferencia trae un toggle *¿El vehículo cambia de servicio?* (por defecto
+**no**) y, al marcarlo, los desplegables de **servicio actual** y **servicio de
+destino**. Dos cosas distintas, que aquí no se mezclan:
+
+- **Registrar** el cambio · pasa **siempre** que se marque, haya bloqueo o no.
+  Sale en el XML como `CAMBIO_SERVICIO = SI`.
+- **Bloquear** la tramitación · solo cuando el **código** de clasificación tiene
+  que cambiar y la ficha técnica todavía no lo refleja.
+
+| Servicio | Código |   | Cambio | ¿Bloquea? |
+|---|---|---|---|---|
+| Particular | 1000 |  | Taxi → Particular (1000 → 1000) | **no** · se transfiere ya |
+| Taxi | 1000 |  | VTC → Particular (1041 → 1000) | **sí** · hasta que la ficha ponga 1000 |
+| VTC | 1041 |  | ASN → Particular (1003 → 1000) | **sí** · ídem |
+| ASN | 1003 |  | | |
+
+> **La regla es por CÓDIGO, no por etiqueta.** Taxi y Particular comparten el
+> 1000: ese cambio de servicio se registra, pero la ficha técnica no cambia y no
+> hay nada que pedir en la ITV. Mandar allí a quien no tiene que ir es un error
+> tan real como dejar pasar al que sí.
+
+Bloqueado, el expediente **no pasa a tramitación** —el selector de estado lo
+rechaza y dice por qué— y la ficha muestra el aviso con el cambio exacto:
+*«El cliente debe solicitar en la ITV el cambio de clasificación 1041→1000. La
+ficha técnica debe reflejar el código 1000 antes de transferir.»*
+
+Se desbloquea de dos maneras: cuando el **código de la ficha técnica** pasa a
+ser el de destino —lo lee **Gest-IA** al subirla, o lo escribe el gestor
+mirándola— o cuando el gestor marca que la ITV ya lo ha hecho, que es una
+confirmación suya y queda como tal.
+
+**Anti-invención.** Solo hay tres códigos y son los que ha confirmado la
+gestoría. Un servicio sin código va con `null`, y eso **no** quiere decir «no
+bloquea»: quiere decir que no se puede decidir, así que bloquea y lo pide. Si
+Gest-IA no lee el código con seguridad, queda en blanco y el expediente sigue
+bloqueado hasta que alguien lo mire.
+
+**Gest-IA aplica exactamente la misma regla**: lee `clasificacion_codigo` de la
+ficha técnica, lo deja en el expediente y a partir de ahí decide la misma
+función. El aviso es literalmente el mismo por los dos caminos.
+
+En el XML: `CAMBIO_SERVICIO` sale SI/NO —lo confirma la plantilla—, pero
+`SERVICIO_ANTERIOR`, `SERVICIO` y `SERVICIO_DESTINO` salen **vacíos y marcados**:
+son el catálogo de servicios de **OEGAM**, que es otra tabla y no la tenemos.
+El informe dice qué servicio es y con qué código de clasificación.
+
+```bash
+node tools/verificar-servicio.js
+```
+
+### 5 · ter · Honorarios y total al cliente
 
 Lo que se liquida a Hacienda y lo que se le **cobra al cliente** son cuentas
 distintas, y por eso van en pestañas distintas. La de *Honorarios y total*

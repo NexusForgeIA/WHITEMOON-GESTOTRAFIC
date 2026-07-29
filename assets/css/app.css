@@ -822,6 +822,37 @@ tbody tr.clickable:hover { background: rgba(124, 77, 255, .07); }
 .badge-exento { background: rgba(0, 212, 170, .15); color: var(--g); }
 .badge-admin  { background: rgba(124, 77, 255, .17); color: var(--p2); }
 .badge-gestor { background: rgba(92, 170, 255, .15); color: #7cb8ff; }
+/* ---------------- Cambio de servicio · aviso de la ficha ----------------
+   Va encima de las pestañas porque decide si el expediente se puede
+   tramitar: enterarse al pulsar «tramitación» es tarde. */
+.srv-aviso {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-2);
+  background: var(--surface);
+  margin-bottom: 18px;
+}
+.srv-aviso svg { width: 20px; height: 20px; flex: none; margin-top: 1px; }
+.srv-aviso b { display: block; font-size: .86rem; margin-bottom: 4px; }
+.srv-aviso p { margin: 0; font-size: .79rem; line-height: 1.62; color: var(--muted); }
+.srv-aviso .srv-salida { margin-top: 7px; }
+.srv-aviso .srv-salida b { display: inline; font-size: inherit; }
+
+.srv-aviso.bloqueado {
+  border-color: rgba(255, 107, 107, .42);
+  background: rgba(255, 107, 107, .09);
+}
+.srv-aviso.bloqueado svg { color: #ff6b6b; }
+.srv-aviso.bloqueado b { color: #ff9d9d; }
+
+.srv-aviso.ok {
+  border-color: rgba(0, 212, 170, .34);
+  background: rgba(0, 212, 170, .07);
+}
+.srv-aviso.ok svg { color: var(--g); }
+.srv-aviso.ok b { color: var(--g); }
+
 /* ---------------- Honorarios · desglose al cliente ----------------
    La columna del medio no es decorativa: dice POR QUÉ cada línea lleva IVA
    o no, que es lo primero que se pierde en cuanto alguien copia el total. */

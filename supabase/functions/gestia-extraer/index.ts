@@ -175,7 +175,14 @@ const PERFILES: Record<string, {
          que ponga el documento; traducirlo a los tipos del CRM es cosa del
          cliente, que ante una clasificación que no encaje deja que elija el
          gestor en vez de acercarse. */
-      clasificacion:       { etiqueta: 'Clasificación',    pista: 'Campo J o "CLASIFICACIÓN": TURISMO, MOTOCICLETA, CICLOMOTOR, AUTOCARAVANA, VEHÍCULO MIXTO… Cópiala literal, sin interpretarla. Si no aparece, devuelve null: no la deduzcas de la marca ni del modelo.' }
+      clasificacion:       { etiqueta: 'Clasificación',    pista: 'Campo J o "CLASIFICACIÓN": TURISMO, MOTOCICLETA, CICLOMOTOR, AUTOCARAVANA, VEHÍCULO MIXTO… Cópiala literal, sin interpretarla. Si no aparece, devuelve null: no la deduzcas de la marca ni del modelo.' },
+      /* El CÓDIGO de clasificación, que es otra cosa que la palabra de
+         arriba: es el número de cuatro dígitos que decide si un vehículo
+         que cambia de servicio tiene que pasar por la ITV antes de
+         transferirse (1000 particular y taxi, 1041 VTC, 1003 ASN). Se
+         copia tal cual; leerlo mal manda a la ITV a quien no debe ir, o
+         deja pasar una transferencia que la DGT devuelve. */
+      clasificacion_codigo: { etiqueta: 'Código de clasificación', pista: 'El CÓDIGO numérico de la clasificación, normalmente cuatro dígitos junto al campo J o a "CLASIFICACIÓN" (p. ej. 1000, 1041, 1003). Solo los dígitos. Si no aparece un código numérico, devuelve null: NO lo deduzcas de la palabra de la clasificación ni del servicio del vehículo.' }
     } }]
   },
   permiso: {

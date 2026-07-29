@@ -153,6 +153,47 @@
     { etiqueta: 'VIA',          re: /^(VIA)\b\.?/ }
   ];
 
+  /* --- Códigos de SERVICIO de OEGAM ------------------------------------
+     VACÍO A PROPÓSITO, igual que SIGLAS y por el mismo motivo.
+
+     El código de CLASIFICACIÓN de la ficha técnica (1000 particular y taxi,
+     1041 VTC, 1003 ASN) lo ha confirmado la gestoría y es el que decide si
+     hay que pasar por la ITV. Pero los campos SERVICIO_ANTERIOR y SERVICIO
+     de OEGAM son de OEGAM, y NADIE nos ha dicho que usen esa misma tabla.
+     La plantilla los trae vacíos, así que de ella no se deduce nada.
+
+     Meter ahí el código de clasificación porque «se parece» sería inventar
+     una equivalencia entre dos catálogos distintos, y va impreso en el
+     permiso de circulación.
+
+     PARA ACTIVARLO: pide a la gestoría la tabla de servicios de OEGAM y
+     rellena aquí `id_del_servicio: 'codigo'`, p. ej.:
+
+         const SERVICIOS_OEGAM = { particular: '00', taxi: '01', vtc: '41' };
+
+     Mientras esté vacío, los dos tags salen vacíos y el informe dice qué
+     servicio se ha registrado y con qué código de clasificación, que es
+     todo lo que el gestor necesita para ponerlo a mano. El registro del
+     cambio —CAMBIO_SERVICIO— sí sale, porque es un SI/NO y ese sí lo
+     confirma la plantilla. */
+  const SERVICIOS_OEGAM = {};
+
+  /** Qué escribir en SERVICIO_ANTERIOR / SERVICIO / SERVICIO_DESTINO. */
+  function servicioDe(exp) {
+    const S = global.GTServicio;
+    if (!S) return { cambia: false, anterior: '', destino: '', evaluacion: null };
+
+    const r = S.evaluar(exp);
+    if (!r.cambia) return { cambia: false, anterior: '', destino: '', evaluacion: r };
+
+    return {
+      cambia: true,
+      anterior: r.anterior ? (SERVICIOS_OEGAM[r.anterior.id] || '') : '',
+      destino: r.destino ? (SERVICIOS_OEGAM[r.destino.id] || '') : '',
+      evaluacion: r
+    };
+  }
+
   /* --- Campos que asigna OEGAM/DGT al importar -------------------------
      Van VACÍOS siempre. Rellenarlos desde aquí sería inventar un número de
      documento o un código electrónico que asigna la plataforma. */
@@ -172,7 +213,6 @@
      para que la gestoría las confirme una vez y para siempre. */
   const CONSTANTES = {
     TIPO_DGT:                   'TRANSMISION ELECTRONICA',
-    CAMBIO_SERVICIO:            'NO',
     MODO_ADJUDICACION:          '1',
     TIPO_TRANSFERENCIA:         '1',
     DECLARACION_RESPONSABILIDAD:'NO',
@@ -665,13 +705,14 @@
   }
 
   function bloqueVehiculo(exp) {
+    const srv = servicioDe(exp);
     return bloque('DATOS_VEHICULO', [
       campo('NUMERO_BASTIDOR', mayus(leer(exp, 'bastidor'))),
       campo('MARCA', mayus(exp.marca)),
       campo('MODELO', mayus(exp.modelo)),
       campo('FECHA_MATRICULACION', fechaDDMMAAAA(exp.fecha_matriculacion)),
       campo('FECHA_CADUCIDAD_ITV', ''),
-      campo('SERVICIO_DESTINO', ''),
+      campo('SERVICIO_DESTINO', srv.destino),
       campo('MODO_ADJUDICACION', CONSTANTES.MODO_ADJUDICACION),
       campo('TIPO_TRANSFERENCIA', CONSTANTES.TIPO_TRANSFERENCIA),
       campo('MOTIVO_ITV', ''),
@@ -684,8 +725,8 @@
       campo('PUEBLO_VEHICULO', ''),
       campo('DECLARACION_RESPONSABILIDAD', CONSTANTES.DECLARACION_RESPONSABILIDAD),
       campo('TIPO_ID_VEHICULO', CONSTANTES.TIPO_ID_VEHICULO),
-      campo('SERVICIO_ANTERIOR', ''),
-      campo('SERVICIO', ''),
+      campo('SERVICIO_ANTERIOR', srv.anterior),
+      campo('SERVICIO', srv.destino),
       campo('VEHICULO_AGRICOLA', ''),
       /* La plantilla pone 0 en los tres. NO son datos del expediente —el
          CRM no guarda tara, MMA ni plazas—, así que se copia el 0 de la
@@ -813,7 +854,12 @@
           campo('FECHA_DEVOLUCION', ''),
           campo('OBSERVACIONES', ''),
           campo('MATRICULA', mayus(exp.matricula)),
-          campo('CAMBIO_SERVICIO', CONSTANTES.CAMBIO_SERVICIO),
+          /* Ya no es una constante: sale del toggle del expediente. La
+             plantilla trae NO, que es el caso normal y sigue siendo el
+             valor por defecto — pero un vehículo que cambia de servicio
+             tiene que decirlo aquí, y eso se registra SIEMPRE, haya o no
+             bloqueo por el código de clasificación. */
+          campo('CAMBIO_SERVICIO', servicioDe(exp).cambia ? 'SI' : 'NO'),
           bloqueAdquiriente(adq),
           bloqueTransmitente(tra),
           bloquePresentador(g),
@@ -844,8 +890,8 @@
       bytes,
       nombre: 'oegam-transferencia-' + (exp.referencia || 'expediente') + '.xml',
       faltan: obligatoriosQueFaltan(raiz),
-      pendientes: pendientesDe(adq, tra, g),
-      avisos: avisosDe(adq, tra, g),
+      pendientes: pendientesDe(adq, tra, g, exp),
+      avisos: avisosDe(adq, tra, g, exp),
       asignaOegam: ASIGNA_OEGAM.slice(),
       constantes: CONSTANTES,
       fueraLatin1: fuera
@@ -871,7 +917,7 @@
   ];
 
   /** Lo que el gestor tiene que completar a mano, y por qué. */
-  function pendientesDe(adq, tra, g) {
+  function pendientesDe(adq, tra, g, exp) {
     const out = [];
     const add = (tag, motivo) => out.push({ tag, motivo });
     const porParte = { ADQUIRIENTE: adq, TRANSMITENTE: tra };
@@ -936,6 +982,27 @@
     add('TARA / PESO_MMA / PLAZAS',
       'van a 0 como en la plantilla: el CRM no los guarda, salen de la ficha técnica');
 
+    /* El cambio de servicio SÍ se registra (CAMBIO_SERVICIO = SI), pero su
+       CÓDIGO en OEGAM está pendiente del catálogo de la gestoría: el de
+       clasificación de la ficha técnica es otra tabla y no se traduce a
+       ojo. Se dice qué servicio es y con qué código de clasificación, que
+       es lo que hace falta para ponerlo a mano. */
+    const srv = servicioDe(exp);
+    if (srv.cambia && srv.evaluacion) {
+      const e = srv.evaluacion;
+      const detalle = (s, cod) => s
+        ? '«' + s.label + '»' + (cod ? ' (clasificación ' + cod + ')' : ' (sin código confirmado)')
+        : 'sin indicar';
+      if (!srv.anterior) {
+        add('SERVICIO_ANTERIOR', 'servicio de origen ' + detalle(e.anterior, e.codigoAnterior)
+          + ': falta su código en el catálogo de servicios de OEGAM');
+      }
+      if (!srv.destino) {
+        add('SERVICIO / SERVICIO_DESTINO', 'servicio de destino ' + detalle(e.destino, e.codigoDestino)
+          + ': falta su código en el catálogo de servicios de OEGAM');
+      }
+    }
+
     return out;
   }
 
@@ -943,7 +1010,7 @@
    * Avisos que NO son huecos: cosas rellenas que hay que mirar antes de
    * importar. Un hueco se ve solo; esto no.
    */
-  function avisosDe(adq, tra, g) {
+  function avisosDe(adq, tra, g, exp) {
     const out = [];
     const porParte = { ADQUIRIENTE: adq, TRANSMITENTE: tra };
 
@@ -958,6 +1025,18 @@
         });
       }
     });
+
+    /* Un expediente bloqueado por el cambio de clasificación se puede
+       exportar —el XML se genera igual—, pero presentarlo con la ficha
+       técnica todavía en el código viejo es que te lo devuelvan. Se avisa
+       aquí, que es el último sitio antes de importar. */
+    const S = global.GTServicio;
+    if (S && exp) {
+      const e = S.evaluar(exp);
+      if (e.bloqueado) {
+        out.push({ tipo: 'cambio_servicio_bloqueado', texto: e.aviso });
+      }
+    }
 
     if (g.demo) {
       out.push({

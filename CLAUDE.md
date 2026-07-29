@@ -181,6 +181,47 @@ depreciación no lo detecta ningún caso suelto.
 
 ---
 
+## Cambio de servicio · registrar siempre, bloquear por CÓDIGO
+
+Un vehículo que ha estado de VTC o de alquiler sin conductor **no se
+transfiere a particular sin más**: su ficha técnica lleva otro código de
+clasificación y hay que pasar por la ITV a cambiarlo ANTES. Presentarla con el
+código viejo es que te la devuelvan.
+
+Dos cosas que **no** son la misma:
+
+1. **Registrar** el cambio · siempre que se marque. Va al XML (`CAMBIO_SERVICIO`).
+2. **Bloquear** la tramitación · solo si el CÓDIGO tiene que cambiar y la ficha
+   técnica todavía no lo refleja.
+
+| Servicio | Código de clasificación |
+|---|---|
+| Particular | **1000** |
+| Taxi | **1000** ← el mismo que particular |
+| VTC | **1041** |
+| ASN (alquiler sin conductor) | **1003** |
+
+**La regla es por CÓDIGO, no por etiqueta.** Taxi → Particular cambia de
+servicio pero NO de código: se registra y se transfiere directamente. Mandar a
+la ITV a quien no tiene que ir es un error tan real como dejar pasar al que sí.
+
+⛔ **Solo esos tres códigos.** Cualquier otro servicio va con `codigo: null`, y
+eso **no significa «no bloquea»**: significa que no se puede decidir, así que
+bloquea y pide el código. La regla entera vive en
+[`assets/js/servicio.js`](assets/js/servicio.js).
+
+```bash
+node tools/verificar-servicio.js
+```
+
+> El código de la ficha lo lee Gest-IA (`clasificacion_codigo` del perfil
+> `ficha_tecnica`) o lo escribe el gestor mirándola. Es **otra cosa** que la
+> palabra de la clasificación, que es la que decide la tabla del Anexo I: no se
+> tocan entre sí. Y los campos `SERVICIO_*` de OEGAM son **otro catálogo**, que
+> no tenemos: salen vacíos y marcados, como `SIGLAS_DIRECCION`.
+
+---
+
 ## Honorarios · el IVA solo toca los honorarios
 
 Lo que se liquida a Hacienda y lo que se le **cobra al cliente** son cuentas

@@ -43,6 +43,15 @@
 (function (global) {
   'use strict';
 
+  /* Opción de un desplegable de servicio. El código de clasificación va en
+     la etiqueta porque es lo que decide si hay que pasar por la ITV, y así
+     el gestor lo ve al elegir en vez de tener que saberlo de memoria. Un
+     servicio sin código confirmado lo dice, en lugar de callarlo. */
+  const opServicio = (s) => ({
+    v: s.id,
+    l: s.label + (s.codigo ? ' · ' + s.codigo : ' · sin código')
+  });
+
   /* --- Campos reutilizables --- */
   const marca      = { n: 'marca',     l: 'Marca',     t: 'text', col: 1, req: 1, ph: 'Seat' };
   const modelo     = { n: 'modelo',    l: 'Modelo',    t: 'text', col: 1, req: 1, ph: 'León 1.5 TSI' };
@@ -283,6 +292,56 @@
                 { v: 'C',   l: 'C (verde)' },
                 { v: 'ECO', l: 'ECO (azul y verde)' },
                 { v: '0',   l: '0 emisiones (azul)' }
+              ]
+            },
+            /* El código de clasificación que la ficha técnica muestra HOY.
+               Lo lee Gest-IA de la ficha o lo escribe el gestor mirándola,
+               y es lo que decide si un cambio de servicio puede transferirse
+               ya o hay que pasar antes por la ITV. Va aquí, con el resto de
+               datos de la ficha, y NO dentro de la sección de servicio: si
+               se ocultara al desmarcar el cambio, `recoger()` lo borraría y
+               se perdería lo que Gest-IA hubiera leído. */
+            { n: 'clasificacion_codigo', l: 'Código de clasificación (ficha técnica)',
+              t: 'text', ph: '1000' }
+          ]
+        },
+        {
+          /* Registrar el cambio y bloquear la tramitación son dos cosas
+             distintas: lo primero pasa siempre que se marque, lo segundo
+             solo si el CÓDIGO tiene que cambiar. La regla vive entera en
+             assets/js/servicio.js. */
+          t: 'Cambio de servicio',
+          campos: [
+            {
+              n: 'cambio_servicio', l: '¿El vehículo cambia de servicio?',
+              t: 'select', full: 1, def: 'no',
+              op: [
+                { v: 'no', l: 'No · sigue con el mismo servicio' },
+                { v: 'si', l: 'Sí · cambia de servicio' }
+              ]
+            },
+            {
+              n: 'servicio_anterior', l: 'Servicio actual', t: 'select',
+              soloSi: { campo: 'cambio_servicio', valor: 'si' },
+              op: [{ v: '', l: '— Selecciona el servicio actual —' }].concat(
+                (global.GTServicio ? global.GTServicio.SERVICIOS : []).map(opServicio))
+            },
+            {
+              n: 'servicio_destino', l: 'Servicio de destino', t: 'select',
+              soloSi: { campo: 'cambio_servicio', valor: 'si' },
+              op: [{ v: '', l: '— Selecciona el servicio de destino —' }].concat(
+                (global.GTServicio ? global.GTServicio.SERVICIOS : []).map(opServicio))
+            },
+            {
+              /* La salida a mano del bloqueo: el gestor tiene la ficha
+                 delante y responde por ello. No la pone la aplicación. */
+              n: 'servicio_itv_confirmado',
+              l: 'La ITV ya ha hecho el cambio de clasificación',
+              t: 'select', def: 'no',
+              soloSi: { campo: 'cambio_servicio', valor: 'si' },
+              op: [
+                { v: 'no', l: 'No / pendiente de comprobar' },
+                { v: 'si', l: 'Sí · lo confirmo yo con la ficha delante' }
               ]
             }
           ]
