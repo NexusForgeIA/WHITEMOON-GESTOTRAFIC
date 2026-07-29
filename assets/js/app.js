@@ -376,7 +376,50 @@
   /** `vendedor_nif` → `vendedor`. */
   const parteDeCampo = (n) => (n.indexOf('_') === -1 ? null : n.slice(0, n.indexOf('_')));
 
+  /* ------------------------------------------------------------
+     Visibilidad condicional (`soloSi`)
+     ------------------------------------------------------------
+     Vive aparte de las partes vendedor/comprador a propósito. Antes iba
+     dentro de su sincronización, y eso ataba TODO campo condicional al
+     selector de tipo de parte: un `soloSi` que dependiera de otra cosa
+     —el cambio de servicio depende de su propio toggle— no se
+     actualizaba nunca, se quedaba oculto y, como un campo oculto no se
+     guarda, se borraba al guardar.
+     ------------------------------------------------------------ */
+
+  /** Muestra u oculta cada campo condicional según su dependencia. */
+  function pintarVisibilidad(root) {
+    /* `data-solo-si-no` invierte la condición: el campo se ve mientras el
+       otro NO valga eso. Es lo que oculta sexo, nacimiento y caducidad
+       cuando la parte es una empresa. Sin dependencia a la vista se
+       muestra el campo: es lo que hace la pestaña de exportación, que no
+       tiene el selector de tipo de parte y los enseña todos. */
+    root.querySelectorAll('[data-solo-si]').forEach(f => {
+      const dep = root.querySelector(`[name="${f.dataset.soloSi}"]`);
+      const igual = !!dep && dep.value === f.dataset.soloSiVal;
+      f.classList.toggle('hidden', f.dataset.soloSiNo ? igual : !igual);
+    });
+  }
+
+  /** Engancha la visibilidad a TODO campo del que dependa alguien. */
+  function activarVisibilidad(root) {
+    const deps = new Set();
+    root.querySelectorAll('[data-solo-si]').forEach(f => deps.add(f.dataset.soloSi));
+    deps.forEach(nombre => {
+      const el = root.querySelector(`[name="${nombre}"]`);
+      if (el) el.addEventListener('change', () => pintarVisibilidad(root));
+    });
+    pintarVisibilidad(root);       // al pintar no se pisa lo ya guardado
+  }
+
   function activarTipoParte(root) {
+    /* La visibilidad condicional va PRIMERO y por su cuenta: hay campos con
+       `soloSi` que no dependen de una parte —el cambio de servicio depende
+       de su propio toggle—, y atarla al selector de vendedor/comprador
+       dejaba esos ocultos para siempre. Ocultos y, desde que un campo
+       oculto no se guarda, borrados al guardar. */
+    activarVisibilidad(root);
+
     const selTipo = {};
     T.PARTES.forEach(p => {
       const sel = root.querySelector(`[name="${p}_tipo"]`);
@@ -401,16 +444,7 @@
     }
 
     function sincronizar(volcarAhora) {
-      /* `data-solo-si-no` invierte la condición: el campo se ve mientras el
-         otro NO valga eso. Es lo que oculta sexo, nacimiento y caducidad
-         cuando la parte es una empresa. Sin dependencia a la vista se
-         muestra el campo: es lo que hace la pestaña de exportación, que no
-         tiene el selector de tipo de parte y los enseña todos. */
-      root.querySelectorAll('[data-solo-si]').forEach(f => {
-        const dep = root.querySelector(`[name="${f.dataset.soloSi}"]`);
-        const igual = !!dep && dep.value === f.dataset.soloSiVal;
-        f.classList.toggle('hidden', f.dataset.soloSiNo ? igual : !igual);
-      });
+      pintarVisibilidad(root);
 
       // Cada campo sigue al tipo de SU parte, no al del vendedor.
       root.querySelectorAll('[data-campo]').forEach(f => {
@@ -1047,6 +1081,31 @@
      dice que falta calcularlo, que es un hueco que se ve. */
   const itpCalculado = (exp) => !!(exp && exp.calculo_json);
 
+  /* ---------- Cambio de servicio · el aviso, fijo en la ficha ----------
+     Va fuera de las pestañas y encima de todo porque decide si el
+     expediente se puede tramitar: enterarse al pulsar «tramitación» es
+     tarde, y enterarse en la ventanilla de la DGT, peor. */
+  function fichaServicio(exp, tr) {
+    if (!tr || tr.exporta !== 'oegam') return '';
+    const r = GTServicio.evaluar(exp);
+    if (!r.cambia) return '';                 // sin cambio no hay nada que decir
+
+    const ico = r.bloqueado
+      ? '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>'
+      : '<path d="M20 6 9 17l-5-5"/>';
+
+    return `<div class="srv-aviso ${r.bloqueado ? 'bloqueado' : 'ok'}">
+      ${svg(ico)}
+      <div>
+        <b>${r.bloqueado ? 'Tramitación bloqueada · cambio de clasificación en la ITV' : 'Cambio de servicio registrado'}</b>
+        <p>${h(r.aviso || '')}</p>
+        ${r.bloqueado ? `<p class="srv-salida">Se desbloquea cuando la <b>ficha técnica</b>
+          muestre el código de destino —Gest-IA lo lee al subirla, o lo escribes en
+          <b>Datos del expediente</b>— o cuando marques ahí que la ITV ya lo ha hecho.</p>` : ''}
+      </div>
+    </div>`;
+  }
+
   /** La tira de importes de la ficha, o el aviso de que falta calcular. */
   function fichaITP(exp, tr) {
     if (!tr || tr.calculo !== 'itp') return '';
@@ -1128,6 +1187,8 @@
 
       ${bannerGestIA(exp)}
 
+      <div id="slot-servicio">${fichaServicio(exp, tr)}</div>
+
       <div id="slot-itp">${fichaITP(exp, tr)}</div>
 
       <div class="tabs" id="tabs">
@@ -1146,11 +1207,16 @@
       if (slot) slot.innerHTML = fichaITP(exp, tr);
     };
 
+    const pintarFichaServicio = () => {
+      const slot = view.querySelector('#slot-servicio');
+      if (slot) slot.innerHTML = fichaServicio(exp, tr);
+    };
+
     const cont = view.querySelector('#tab-content');
     const paneles = {
       itp: () => panelITP(exp, cont, pintarFichaITP),
       honorarios: () => panelHonorarios(exp, cont, pintarFichaITP),
-      datos: () => panelDatos(exp, tr, cont),
+      datos: () => panelDatos(exp, tr, cont, pintarFichaServicio),
       docs: () => panelDocs(exp, tr, docs, cont),
       genera: () => panelGenera(exp, tr, docs, cont),
       oegam: () => panelOegam(exp, tr, cont)
@@ -1165,6 +1231,14 @@
 
     view.querySelector('#slot-estado').appendChild(
       selectorEstado(exp.estado, async (nuevo) => {
+        /* El bloqueo por cambio de clasificación se aplica AQUÍ, que es la
+           puerta por la que el expediente entra en tramitación. Lanzar hace
+           que el desplegable vuelva al estado anterior y enseñe el motivo:
+           un expediente presentado con la ficha técnica todavía en el código
+           viejo lo devuelve la DGT. */
+        const paso = GTServicio.puedeIrA(exp, nuevo);
+        if (!paso.puede) throw new Error(paso.aviso);
+
         await GTApi.actualizarExpediente(id, { estado: nuevo });
         exp.estado = nuevo;
         toast('Estado actualizado: ' + estadoInfo(nuevo).label, 'ok');
@@ -2181,7 +2255,7 @@
   }
 
   /* ---------- Panel: Datos (formulario editable generado por catálogo) ---------- */
-  function panelDatos(exp, tr, cont) {
+  function panelDatos(exp, tr, cont, onCambio) {
     cont.innerHTML = `
       <div class="detail-grid">
         <form class="card" id="form-datos" style="align-self:start">
@@ -2264,7 +2338,11 @@
         await GTApi.actualizarExpediente(exp.id, cambios);
         Object.assign(exp, cambios);
         toast('Datos guardados', 'ok');
-        panelDatos(exp, tr, cont);              // refleja tipo de vendedor y exención
+        panelDatos(exp, tr, cont, onCambio);    // refleja tipo de vendedor y exención
+        /* El cambio de servicio y el código de clasificación se editan en
+           este formulario, así que el aviso de la ficha —que decide si se
+           puede tramitar— tiene que repintarse con lo recién guardado. */
+        if (onCambio) onCambio();
       } catch (err) {
         toast(err.message || 'No se pudieron guardar', 'err');
         btn.disabled = false;

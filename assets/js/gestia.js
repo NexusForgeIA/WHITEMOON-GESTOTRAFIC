@@ -25,7 +25,12 @@
       combustible:         'combustible',
       cvf:                 'cvf',
       cilindrada:          'cilindrada',
-      bastidor:            'bastidor'
+      bastidor:            'bastidor',
+      /* El código de clasificación de la ficha. NO se traduce ni se
+         interpreta: es el número que decide si un cambio de servicio
+         puede transferirse ya o tiene que pasar antes por la ITV
+         (ver assets/js/servicio.js). */
+      clasificacion_codigo: 'clasificacion_codigo'
     },
     permiso: {
       matricula: 'matricula',
