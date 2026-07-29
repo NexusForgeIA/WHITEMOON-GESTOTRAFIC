@@ -587,30 +587,65 @@ ok(pendPersona.length === 0,
   pendPersona.map(p => p.tag).join(', '));
 
 /* ============================================================
-   11 bis · El esquema del DNI cabe en el límite de la API
+   11 bis · Los esquemas de Gest-IA caben en los límites de la API
    ------------------------------------------------------------
-   La API admite como mucho 16 parámetros con unión (`anyOf`) por esquema, y
-   un `valor` nullable gasta uno. Pasarse no da un aviso: devuelve 400 y
-   TODA lectura de DNI deja de funcionar de golpe, en producción y sin que
-   ningún test de aquí se entere. Por eso se cuenta desde fuera.
+   Son DOS topes distintos y los dos devuelven el mismo 400, sin aviso previo
+   y en producción:
+
+     · UNIONES   · como mucho 16 parámetros con unión (`anyOf`) por esquema.
+                   Un `valor` nullable gasta uno; los `simple: true` no.
+     · GRAMÁTICA · el esquema entero se compila y el resultado tiene un tamaño
+                   máximo. Medido contra la API con la forma que usamos aquí
+                   —un objeto {valor, confianza, nota} por campo— 14 campos
+                   compilan y 15 devuelven «compiled grammar is too large».
+
+   El segundo es el que se pasó por alto: el perfil `dni` llegó a 17 campos
+   gastando solo 11 uniones, así que este verificador lo daba por bueno y
+   TODA lectura de DNI llevaba días fallando. Por eso ahora se cuentan los
+   campos POR BLOQUE, que es la unidad que se convierte en un esquema.
    ============================================================ */
-console.log('\n11 bis · Presupuesto de uniones del esquema de Gest-IA');
+console.log('\n11 bis · Límites de los esquemas de Gest-IA');
 /* Sin normalizar los saltos de línea esto no encuentra nada en Windows, donde
    git deja el fichero en CRLF, y un `✗` por el final de línea no dice nada. */
 const FN = fs.readFileSync(
   path.join(RAIZ, 'supabase', 'functions', 'gestia-extraer', 'index.ts'), 'utf8')
   .replace(/\r\n/g, '\n');
 
-const perfilDni = /\bdni:\s*\{[\s\S]*?\n  \},\n  cif:/.exec(FN);
-ok(!!perfilDni, 'se localiza el perfil `dni` en la Edge Function');
-if (perfilDni) {
-  const campos = perfilDni[0].match(/^\s{6}\w+:\s*\{/gm) || [];
-  const simples = perfilDni[0].match(/simple:\s*true/g) || [];
-  const uniones = campos.length - simples.length;
-  console.log(`      ${campos.length} campos · ${simples.length} sin unión · ${uniones} uniones`);
-  ok(uniones <= 16, `el perfil dni gasta ${uniones} uniones y el tope es 16`);
-  ok(simples.length === 6, 'los seis campos del desglose de la vía van sin unión', String(simples.length));
-}
+const tope = /const MAX_CAMPOS_ESQUEMA = (\d+)/.exec(FN);
+ok(!!tope, 'la Edge Function declara MAX_CAMPOS_ESQUEMA');
+const MAX_CAMPOS = tope ? Number(tope[1]) : 14;
+ok(MAX_CAMPOS <= 14,
+  `MAX_CAMPOS_ESQUEMA es ${MAX_CAMPOS}; medido contra la API, 15 ya no compila`);
+
+/* Cada `campos: {` abre un bloque, y un bloque es exactamente un esquema. Los
+   campos se cuentan por su `etiqueta:`, que llevan todos y solo ellos. Se mira
+   solo dentro de PERFILES: más abajo hay variables que también se llaman
+   `campos` y contarlas como bloques solo despista. */
+const PERFILES_SRC = (/const PERFILES[\s\S]*?\n\};\n/.exec(FN) || [''])[0];
+ok(PERFILES_SRC.length > 0, 'se localiza el catálogo PERFILES');
+const trozos = PERFILES_SRC.split(/campos:\s*\{/).slice(1);
+ok(trozos.length >= 6, 'se localizan los bloques de campos en la Edge Function',
+  `${trozos.length} bloques`);
+
+let bloquesMal = 0;
+trozos.forEach((trozo, i) => {
+  const campos = (trozo.match(/etiqueta:/g) || []).length;
+  const simples = (trozo.match(/simple:\s*true/g) || []).length;
+  const uniones = campos - simples;
+  console.log(`      bloque ${i + 1}: ${campos} campos · ${simples} sin unión · ${uniones} uniones`);
+  if (campos > MAX_CAMPOS || uniones > 16) bloquesMal++;
+});
+ok(bloquesMal === 0,
+  `ningún bloque pasa de ${MAX_CAMPOS} campos ni de 16 uniones`,
+  `${bloquesMal} bloque(s) fuera de límite`);
+
+/* El DNI son 17 campos repartidos en dos bloques: si alguien los vuelve a
+   juntar en uno, esto lo caza antes de que lo cace un expediente real. */
+const dniBloques = (/\bdni:\s*\{[\s\S]*?\n  \},\n  cif:/.exec(FN) || [''])[0];
+ok((dniBloques.match(/cara:\s*'(anverso|reverso)'/g) || []).length === 2,
+  'el perfil dni sigue partido en dos bloques, anverso y reverso');
+ok((dniBloques.match(/simple:\s*true/g) || []).length === 6,
+  'los seis campos del desglose de la vía van sin unión');
 
 /* ============================================================
    12 · Sexo · V hombre · H mujer · X empresa
