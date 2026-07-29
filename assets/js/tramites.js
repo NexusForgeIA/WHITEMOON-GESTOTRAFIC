@@ -70,7 +70,7 @@
 
   const vendedor = [
     { n: 'vendedor_nombre',    l: 'Nombre y apellidos', t: 'text', col: 1, ph: 'Antonio Ruiz Pérez' },
-    { n: 'vendedor_nif',       l: 'DNI / NIF',          t: 'text', col: 1, ph: '11223344A' },
+    { n: 'vendedor_nif',       l: 'DNI / NIF',          t: 'text', col: 1, ph: '11223344B' },
     { n: 'vendedor_direccion', l: 'Domicilio',          t: 'text', col: 1, ph: 'Av. de España 22, Madrid' },
     { n: 'vendedor_telefono',  l: 'Teléfono',           t: 'text', col: 1, ph: '600 111 222' }
   ];
@@ -179,7 +179,7 @@
     vendedorTipo,
     vendedorEmpresaSel,
     { n: 'vendedor_nombre',    l: 'Nombre y apellidos', t: 'text', col: 1, ph: 'Antonio Ruiz Pérez', autoSi: 'empresa', lSi: 'Razón social' },
-    { n: 'vendedor_nif',       l: 'DNI / NIF',          t: 'text', col: 1, ph: '11223344A',          autoSi: 'empresa', lSi: 'CIF' },
+    { n: 'vendedor_nif',       l: 'DNI / NIF',          t: 'text', col: 1, ph: '11223344B',          autoSi: 'empresa', lSi: 'CIF' },
     { n: 'vendedor_direccion', l: 'Domicilio',          t: 'text', col: 1, ph: 'Av. de España 22, Madrid', autoSi: 'empresa', lSi: 'Domicilio social' },
     { n: 'vendedor_telefono',  l: 'Teléfono',           t: 'text', col: 1, ph: '600 111 222',        autoSi: 'empresa' }
   ].concat(camposPersona('vendedor'));

@@ -53,18 +53,28 @@ ok(V.documento('12345678A').valido === false, '12345678A NO lo es (la letra buen
 ok(/letra de control/.test(V.documento('12345678A').motivo || ''),
   'y el motivo dice que es la letra de control', V.documento('12345678A').motivo);
 
+/* Los de la DEMO. Son ficticios, pero llevan su letra de control BIEN
+   calculada a propósito: si no, todos los expedientes de demostración
+   saldrían con un aviso encima y lo primero que vería quien la mira sería
+   un fallo que no es un fallo. Que sigan pasando es la comprobación de
+   que nadie los ha vuelto a tocar a ojo. */
 ok(V.documento('00000001R').valido === true, '00000001R es válido  (1 % 23 = 1 → R)');
 ok(V.documento('00000002W').valido === true, '00000002W es válido  (2 % 23 = 2 → W)');
 ok(V.documento('14308839X').valido === true, '14308839X (cliente de la demo) es válido');
+ok(V.documento('71640935Y').valido === true, '71640935Y (el del buscador) es válido');
+ok(V.documento('39485712W').valido === true, '39485712W (Nuria Beltrán) es válido');
+ok(V.documento('47712608M').valido === true, '47712608M (Rocío Palomares) es válido');
+ok(V.documento('52098431G').valido === true, '52098431G (Íñigo Arrieta) es válido');
+ok(V.documento('05639274L').valido === true, '05639274L (Damián Escobar) es válido');
+ok(V.documento('70059284L').valido === true, '70059284L es válido');
+ok(V.documento('11223344B').valido === true, '11223344B (placeholder del vendedor) es válido');
 
-/* Los datos de prueba de la DEMO son ficticios y algunos NO pasan el
-   control — que es justo lo que este módulo tiene que decir. Se fija aquí
-   para que quede claro que es la letra la que está mal y no el algoritmo:
-   el 00000002 lleva W, y el 71640935, Y. */
-ok(V.documento('00000002S').valido === false,
-  '00000002S (dato ficticio de la demo) NO pasa: le corresponde la W');
-ok(V.documento('71640935D').valido === false,
-  '71640935D (el del buscador de expedientes) tampoco: le corresponde la Y');
+/* Y las mismas cifras con la letra cambiada NO pasan: es lo que demuestra
+   que el validador sigue cazando una errata y que arriba no está diciendo
+   que sí a todo. */
+ok(V.documento('00000002S').valido === false, '00000002S no pasa: le corresponde la W');
+ok(V.documento('71640935D').valido === false, '71640935D tampoco: le corresponde la Y');
+ok(V.documento('39485712H').valido === false, '39485712H tampoco: le corresponde la W');
 
 // Formato flexible: se teclea con puntos y guiones, y eso no es un error.
 ok(V.documento('12.345.678-Z').valido === true, 'con puntos y guiones sigue siendo válido');
@@ -97,10 +107,12 @@ console.log('\n3 · CIF');
 ok(V.documento('B00000001').valido === false, 'B00000001 no cuadra (el control sería 0)');
 ok(V.documento('B00000000').valido === true, 'B00000000 sí');
 ok(V.documento('B00000000').tipo === 'cif', 'y se identifica como CIF');
-ok(V.documento('B85017424').valido === true, 'B85017424 es válido (el control es el 4)');
-// El de la demo lleva un 3 y es ficticio: se caza igual que un DNI mal.
-ok(V.documento('B85017423').valido === false,
-  'B85017423 (empresa ficticia de la demo) NO pasa: el control sería 4');
+// Los CIF de las dos empresas de la demo, con su control bien calculado.
+ok(V.documento('B85017424').valido === true, 'B85017424 (Automoción Vega del Henares) es válido');
+ok(V.documento('B84720911').valido === true, 'B84720911 (Talleres Norte Motor) es válido');
+// Y con el control cambiado, no pasan.
+ok(V.documento('B85017423').valido === false, 'B85017423 no pasa: el control sería 4');
+ok(V.documento('B84720915').valido === false, 'B84720915 tampoco: el control sería 1');
 /* Las organizaciones tipo P, Q, S, N, W y R llevan LETRA de control. */
 ok(V.documento('P0000000J').valido === true, 'P0000000J es válido (control por letra)');
 ok(V.documento('P00000000').valido === false, 'P00000000 no: esa organización no lleva dígito');
