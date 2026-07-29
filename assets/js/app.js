@@ -845,7 +845,7 @@
       <div class="buscador-exp">
         ${svg('<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>', 'lupa')}
         <input id="busca-exp" type="search" autocomplete="off" value="${h(termino)}"
-               placeholder="Buscar por matrícula o DNI/NIF…  ·  4821 NBH · 71640935D">
+               placeholder="Buscar por matrícula o DNI/NIF…  ·  4821 NBH · 71640935Y">
         <button class="btn-limpiar hidden" id="limpia-busca" title="Limpiar búsqueda"
                 aria-label="Limpiar búsqueda">${svg('<path d="M18 6L6 18M6 6l12 12"/>')}</button>
       </div>
