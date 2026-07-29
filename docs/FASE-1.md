@@ -168,6 +168,36 @@ queda en 0 y el total se reduce a la tasa DGT (mismo caso: 395,70 € → 55,70 
 `calculo_json` conserva íntegro el resultado del motor, así que la exención es
 auditable y reversible. Detalle en [`TRAMITES.md`](TRAMITES.md).
 
+### 5 · Validaciones previas del expediente
+
+Repaso de los datos que ya hay, **antes** de tramitar o de generar el XML. Sale
+en la ficha, encima de las pestañas, y desaparece solo cuando no queda nada:
+
+| Comprobación | Qué caza |
+|---|---|
+| **NIF / NIE / CIF** | la letra (o dígito) de control de todos los intervinientes: titular, comprador, vendedor |
+| **Matrícula** | que no encaje ni con el formato europeo (0000 BBB) ni con el provincial antiguo (M 0000 XX) |
+| **Bastidor (VIN)** | que no tenga exactamente 17 alfanuméricos — o que lleve **I, O o Q**, que un VIN no usa nunca y suelen ser un 1 o un 0 mal leídos |
+| **Obligatorios** | los que exige el trámite y están en blanco: el *motivo* del duplicado, el de la baja… |
+
+> Son **AVISOS, no bloqueos**, y GestoTrafic **no corrige nada**. El aviso de un
+> NIF ni siquiera dice cuál sería la letra correcta: decirla invita a
+> escribirla sin mirar el documento, que es justo cómo se acaba inscribiendo a
+> otra persona. La última palabra la tiene el papel que el gestor tiene delante.
+
+La otra mitad importa igual: **un expediente correcto no genera ni un aviso**.
+Un validador que avisa de más se acaba ignorando, y entonces deja de avisar de
+lo que importa. Por eso `caducidad_nif` —que acaba en `_nif` pero es una
+fecha— no entra en la revisión de documentos, y un obligatorio que ahora mismo
+está oculto no se reclama.
+
+Los obligatorios salen del **catálogo del trámite**, así que el *motivo* del
+duplicado y el de la baja entran solos: no hay una lista aparte que mantener.
+
+```bash
+node tools/verificar-validaciones.js
+```
+
 ### 5 · bis · Cambio de servicio y bloqueo por clasificación
 
 Un vehículo que ha estado dado de alta como **VTC** o como **alquiler sin
