@@ -181,6 +181,34 @@ depreciación no lo detecta ningún caso suelto.
 
 ---
 
+## Validaciones previas · avisan, no corrigen
+
+Repaso estándar de los datos antes de tramitar: letra de control de
+NIF/NIE/CIF, formato de matrícula, longitud del bastidor y obligatorios del
+trámite en blanco. Vive en
+[`assets/js/validaciones.js`](assets/js/validaciones.js).
+
+```bash
+node tools/verificar-validaciones.js
+```
+
+Son **avisos**, no bloqueos, y **no corrigen nada**. En particular: el aviso de
+un NIF **no dice cuál sería la letra buena**. Decirla invita a escribirla sin
+mirar el documento, que es justo cómo se acaba inscribiendo a otra persona.
+
+> ⚠️ Dos trampas que ya costaron un falso positivo cada una:
+>
+> - `caducidad_nif` acaba en `_nif` y **es una fecha**. La revisión de
+>   documentos filtra por `c.t !== 'date'`, no por el sufijo.
+> - Un **obligatorio oculto** (`soloSi`) no se reclama: no se le está pidiendo
+>   a nadie.
+>
+> Un validador que avisa de más se ignora entero, y entonces deja de avisar de
+> lo que importa. Por eso el verificador comprueba las dos caras: que caza el
+> error **y** que un expediente correcto no saca ni un aviso.
+
+---
+
 ## Cambio de servicio · registrar siempre, bloquear por CÓDIGO
 
 Un vehículo que ha estado de VTC o de alquiler sin conductor **no se

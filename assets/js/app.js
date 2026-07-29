@@ -1081,6 +1081,34 @@
      dice que falta calcularlo, que es un hueco que se ve. */
   const itpCalculado = (exp) => !!(exp && exp.calculo_json);
 
+  /* ---------- Validaciones previas · lo que no cuadra ----------
+     Repaso de los datos que ya hay: letras de control, formatos y huecos
+     obligatorios. Va en la ficha y no en el exportador porque el momento
+     de arreglar una errata es antes de tramitar, no al descargar el XML.
+
+     Son AVISOS. No bloquean, no corrigen y desaparecen solos en cuanto el
+     dato cuadra: si avisaran de más, se acabarían ignorando. */
+  function fichaAvisos(exp, tr) {
+    const avisos = GTValidaciones.revisar(exp, tr);
+    if (!avisos.length) return '';
+
+    return `<details class="val-aviso" open>
+      <summary>
+        ${svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>')}
+        <b>${avisos.length} ${avisos.length === 1 ? 'dato que revisar' : 'datos que revisar'}</b>
+        <span>antes de tramitar · no bloquean, los confirmas tú</span>
+      </summary>
+      <ul>
+        ${avisos.map(a => `<li>
+          <span class="val-campo">${h(a.etiqueta)}</span>
+          ${h(a.texto)}
+        </li>`).join('')}
+      </ul>
+      <p class="val-nota">GestoTrafic <b>no corrige</b> ninguno de estos datos:
+        los comprueba y te los enseña. La última palabra la tiene el documento.</p>
+    </details>`;
+  }
+
   /* ---------- Cambio de servicio · el aviso, fijo en la ficha ----------
      Va fuera de las pestañas y encima de todo porque decide si el
      expediente se puede tramitar: enterarse al pulsar «tramitación» es
@@ -1187,6 +1215,8 @@
 
       ${bannerGestIA(exp)}
 
+      <div id="slot-avisos">${fichaAvisos(exp, tr)}</div>
+
       <div id="slot-servicio">${fichaServicio(exp, tr)}</div>
 
       <div id="slot-itp">${fichaITP(exp, tr)}</div>
@@ -1207,9 +1237,13 @@
       if (slot) slot.innerHTML = fichaITP(exp, tr);
     };
 
+    /* Los dos avisos de la ficha se repintan juntos: los dos leen del
+       formulario de datos y los dos cambian al guardarlo. */
     const pintarFichaServicio = () => {
       const slot = view.querySelector('#slot-servicio');
       if (slot) slot.innerHTML = fichaServicio(exp, tr);
+      const av = view.querySelector('#slot-avisos');
+      if (av) av.innerHTML = fichaAvisos(exp, tr);
     };
 
     const cont = view.querySelector('#tab-content');
