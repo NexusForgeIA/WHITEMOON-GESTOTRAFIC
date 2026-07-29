@@ -182,6 +182,68 @@ window.GT_PROVINCIAS = {
   CEUTA: 'Ceuta', MELILLA: 'Melilla'
 };
 
+/* --- Las 52 provincias, para el desplegable del domicilio -----------------
+   `GT_PROVINCIAS` de arriba traduce provincia → CCAA y admite alias (GERONA,
+   GIRONA…) porque lee lo que venga de un documento. Esto es otra cosa: es la
+   lista CERRADA que se le ofrece al gestor, un nombre por provincia.
+
+   Escribir la provincia a mano era el hueco por el que se colaba «Vizkaya» o
+   «La Coruña, A» y el exportador la dejaba vacía sin que nadie entendiera por
+   qué. Con el desplegable, lo que se guarda siempre lo reconocen las DOS
+   tablas: la de CCAA (tipo de ITP) y la de códigos de OEGAM.
+
+   Los nombres van en la forma que reconocen ambas —la comparación normaliza
+   acentos y mayúsculas—, y `tools/verificar-oegam.js` comprueba una a una que
+   las 52 resuelven. Añadir una que no resuelva rompe la verificación, que es
+   justo lo que tiene que pasar. */
+window.GT_PROVINCIAS_LISTA = [
+  'Álava', 'Albacete', 'Alicante', 'Almería', 'Asturias', 'Ávila', 'Badajoz',
+  'Baleares', 'Barcelona', 'Burgos', 'Cáceres', 'Cádiz', 'Cantabria',
+  'Castellón', 'Ceuta', 'Ciudad Real', 'Córdoba', 'Cuenca', 'Girona',
+  'Granada', 'Guadalajara', 'Guipúzcoa', 'Huelva', 'Huesca', 'Jaén',
+  'La Coruña', 'La Rioja', 'Las Palmas', 'León', 'Lleida', 'Lugo', 'Madrid',
+  'Málaga', 'Melilla', 'Murcia', 'Navarra', 'Ourense', 'Palencia',
+  'Pontevedra', 'Salamanca', 'Santa Cruz de Tenerife', 'Segovia', 'Sevilla',
+  'Soria', 'Tarragona', 'Teruel', 'Toledo', 'Valencia', 'Valladolid',
+  'Vizcaya', 'Zamora', 'Zaragoza'
+];
+
+/* --- Tipos de vía ---------------------------------------------------------
+   Lo que se guarda (`v`) es la ETIQUETA del tipo de vía, no su código: el
+   código de OEGAM (SIGLAS_DIRECCION) es numérico y su tabla la publica el
+   Colegio. Mientras no la tengamos, ese campo del XML sale VACÍO —no se
+   inventa— y el informe de exportación dice qué tipo de vía se ha elegido
+   para que el gestor ponga el código en dos segundos. Cuando llegue la tabla
+   se rellena `SIGLAS` en assets/js/oegam.js y estos valores son sus claves.
+
+   Por eso las etiquetas son EXACTAMENTE las que oegam.js sabe detectar en un
+   domicilio en texto libre: es un solo vocabulario para el desplegable y para
+   la detección, y el verificador comprueba que no se separen. */
+window.GT_TIPOS_VIA = [
+  { v: '',             l: '— Sin especificar —' },
+  { v: 'CALLE',        l: 'Calle' },
+  { v: 'AVENIDA',      l: 'Avenida' },
+  { v: 'PLAZA',        l: 'Plaza' },
+  { v: 'PASEO',        l: 'Paseo' },
+  { v: 'CAMINO',       l: 'Camino' },
+  { v: 'CARRETERA',    l: 'Carretera' },
+  { v: 'TRAVESIA',     l: 'Travesía' },
+  { v: 'RONDA',        l: 'Ronda' },
+  { v: 'GLORIETA',     l: 'Glorieta' },
+  { v: 'VIA',          l: 'Vía' },
+  { v: 'CALLEJON',     l: 'Callejón' },
+  { v: 'PASAJE',       l: 'Pasaje' },
+  { v: 'RAMBLA',       l: 'Rambla' },
+  { v: 'BULEVAR',      l: 'Bulevar' },
+  { v: 'ALAMEDA',      l: 'Alameda' },
+  { v: 'CUESTA',       l: 'Cuesta' },
+  { v: 'URBANIZACION', l: 'Urbanización' },
+  { v: 'POLIGONO',     l: 'Polígono' },
+  { v: 'PARQUE',       l: 'Parque' },
+  { v: 'BARRIO',       l: 'Barrio' },
+  { v: 'LUGAR',        l: 'Lugar' }
+];
+
 /**
  * CCAA de una provincia leída de un documento, o `null` si no se reconoce.
  *

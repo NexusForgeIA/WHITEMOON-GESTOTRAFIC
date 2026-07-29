@@ -439,16 +439,34 @@
        Solo se acepta uno de los tres códigos. Una empresa es X porque lo es,
        no porque lo diga un documento. */
     let sexo = mayus(d('sexo'));
-    if (CONSTANTES.SEXOS.indexOf(sexo) === -1) {
-      sexo = esEmpresa ? CONSTANTES.SEXO_PERSONA_JURIDICA : '';
+    if (esEmpresa) {
+      sexo = CONSTANTES.SEXO_PERSONA_JURIDICA;
+    } else if (CONSTANTES.SEXOS.indexOf(sexo) === -1) {
+      sexo = '';
     }
 
+    /* Una persona jurídica no nace ni le caduca el DNI. Si la parte cambió de
+       particular a empresa a mitad del expediente, esos dos datos pueden
+       haberse quedado en `datos` de antes: no se emiten. No es lo mismo que
+       inventarlos —aquí sobra información, no falta—, y una fecha de
+       nacimiento colgada de una razón social es un dato falso en el XML. */
+    const nacimiento = esEmpresa ? '' : fechaDDMMAAAA(d('nacimiento'));
+    const caducidadNif = esEmpresa ? '' : fechaDDMMAAAA(d('caducidad_nif'));
+
     /* --- Domicilio ---
-       El desglose fino (escalera, piso, puerta, letra) SOLO sale del DNI:
-       del texto libre no se saca, porque en «SIETE VIENTOS 39 PBJ» nada
-       distingue una planta de un nombre de calle sin ver el documento. */
+       El desglose fino (escalera, piso, puerta, letra) SOLO sale del campo
+       correspondiente —lo escriba el gestor en la ficha o lo lea Gest-IA del
+       DNI—: del texto libre no se saca, porque en «SIETE VIENTOS 39 PBJ» nada
+       distingue una planta de un nombre de calle sin ver el documento.
+
+       El tipo de vía ELEGIDO en el desplegable manda sobre el detectado en la
+       cadena: uno lo ha mirado una persona y el otro es un patrón sobre texto
+       libre. Ojo, lo elegido es la ETIQUETA («CALLE»), no el código de OEGAM:
+       ese sigue saliendo vacío mientras `SIGLAS` esté sin cargar. */
+    const tipoViaElegido = mayus(d('tipo_via'));
     const dir = {
-      tipoVia: libre.tipoVia,
+      tipoVia: primero(tipoViaElegido, libre.tipoVia),
+      elegido: !vacio(tipoViaElegido),
       via: mayus(primero(d('via'), libre.via)),
       numero: mayus(primero(d('via_numero'), libre.numero)),
       escalera: mayus(d('escalera')),
@@ -457,7 +475,7 @@
       letra: mayus(d('letra')),
       restoSinUsar: libre.restoSinUsar,
       // ¿Hay desglose de verdad, o solo lo que se pudo raspar del texto?
-      delDni: !vacio(d('via'))
+      desglosado: !vacio(d('via'))
     };
 
     const provNombre = primero(d('provincia'), cli ? cli.provincia : null);
@@ -467,7 +485,7 @@
        Un DNI caducado no lo rechaza este exportador: lo AVISA. Quien decide
        si se puede tramitar con él es el gestor, y para eso necesita verlo
        antes de importar, no descubrirlo en la ventanilla. */
-    const caducidad = aFecha(d('caducidad_nif'));
+    const caducidad = esEmpresa ? null : aFecha(d('caducidad_nif'));
     const caducado = !!(caducidad && hoy && caducidad < hoy);
 
     return {
@@ -476,8 +494,8 @@
       dni: mayus(nif),
       sexo,
       ape1, ape2, pila, avisoNombre,
-      nacimiento: fechaDDMMAAAA(d('nacimiento')),
-      caducidadNif: fechaDDMMAAAA(d('caducidad_nif')),
+      nacimiento,
+      caducidadNif,
       caducado,
       telefono: mayus(d('telefono')),
       dir,
@@ -883,15 +901,19 @@
       if (p.teniaDireccion) {
         if (!SIGLAS[p.dir.tipoVia]) {
           add('SIGLAS_DIRECCION_' + suf, p.dir.tipoVia
-            ? 'tipo de vía detectado «' + p.dir.tipoVia + '»: falta su código en el catálogo OEGAM'
-            : 'no se reconoce el tipo de vía en el domicilio del ' + quien);
+            ? 'tipo de vía ' + (p.dir.elegido ? 'elegido' : 'detectado') + ' «' + p.dir.tipoVia
+              + '»: falta su código en el catálogo OEGAM'
+            : 'no se reconoce el tipo de vía en el domicilio del ' + quien
+              + ': elígelo en la ficha del expediente');
         }
-        /* Con el DNI leído, el desglose lo pone Gest-IA viendo el documento y
-           no hay nada que avisar. Sin él, lo único que hay es una cadena de
-           texto: se dice, y se enseña lo que quedó suelto detrás del número. */
-        if (!p.dir.delDni) {
-          add('PISO_DIRECCION_' + suf, 'el DNI del ' + quien + ' no se ha leído: piso, puerta, '
-            + 'letra y escalera no se sacan del domicilio en texto libre'
+        /* Con el domicilio desglosado —lo haya escrito el gestor en la ficha o
+           lo haya leído Gest-IA del DNI— no hay nada que avisar. Sin él, lo
+           único que hay es una cadena de texto: se dice, y se enseña lo que
+           quedó suelto detrás del número. */
+        if (!p.dir.desglosado) {
+          add('PISO_DIRECCION_' + suf, 'el domicilio del ' + quien + ' no está desglosado: piso, '
+            + 'puerta, letra y escalera no se sacan del texto libre. Rellénalos en la ficha del '
+            + 'expediente o sube su DNI'
             + (p.dir.restoSinUsar ? ' (sin repartir: «' + p.dir.restoSinUsar + '»)' : ''));
         }
       }
@@ -975,6 +997,11 @@
     aLatin1,
     PROVINCIAS,
     SIGLAS,
+    /* Las etiquetas que este módulo sabe detectar en un domicilio. El
+       desplegable del formulario (GT_TIPOS_VIA) tiene que ofrecer estas
+       mismas: son las claves con las que se buscará el código en SIGLAS
+       cuando la gestoría nos pase su catálogo. */
+    ETIQUETAS_TIPO_VIA: TIPOS_VIA.map(t => t.etiqueta),
     ASIGNA_OEGAM,
     CONSTANTES,
     OBLIGATORIOS

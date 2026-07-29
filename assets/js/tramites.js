@@ -26,7 +26,9 @@
      op    · opciones (para select)
      full  · ocupa el ancho completo
      soloSi· { campo, valor } → el campo solo se muestra si otro campo
-             del formulario tiene ese valor (visibilidad condicional)
+             del formulario tiene ese valor (visibilidad condicional).
+             Con `no: 1` se invierte: se muestra si NO vale eso — así los
+             campos de persona física desaparecen cuando la parte es empresa
      autoSi· 'empresa' → en ese modo lo rellena la aplicación (solo lectura)
      lSi   · etiqueta alternativa cuando la parte del campo (vendedor_tipo,
              comprador_tipo…) vale 'empresa': "DNI / NIF" pasa a "CIF"
@@ -87,6 +89,81 @@
     soloSi: { campo: 'vendedor_tipo', valor: 'empresa' }
   };
 
+  /* --- Los campos de persona y domicilio que pide OEGAM ------------------
+     Estos son los MISMOS campos que Gest-IA propone al leer un DNI a dos
+     caras. La diferencia entre los dos caminos es solo QUIÉN los rellena: en
+     el alta manual los escribe el gestor, y con Gest-IA vienen propuestos y
+     él los revisa. El modelo de datos es uno —viven en `datos` con la clave
+     `<parte>_<campo>`—, así que el XML de OEGAM sale igual por los dos lados.
+
+     Ninguno lleva `col: 1`: van al jsonb `datos`, que es donde ya vivían
+     cuando solo se editaban desde la pestaña de exportación. No hay migración
+     ni columna nueva.
+
+     `persona: 1` marca lo que solo tiene una persona física. Si la parte es
+     una empresa esos campos se ocultan —una razón social no tiene sexo ni
+     fecha de nacimiento, y su representante sale del poder o del mandato—,
+     pero el DOMICILIO se queda: una empresa también tiene domicilio social y
+     OEGAM lo pide desglosado igual. */
+  const CAMPOS_PERSONA_DEF = [
+    { n: 'nombre_pila',   l: 'Nombre (sin apellidos)', t: 'text', ph: 'María',  persona: 1 },
+    { n: 'apellido1',     l: 'Primer apellido',        t: 'text', ph: 'García', persona: 1 },
+    { n: 'apellido2',     l: 'Segundo apellido',       t: 'text', ph: 'López',  persona: 1 },
+    {
+      /* V hombre · H mujer · X persona jurídica. La de mujer es H, NO M: la M
+         del DNI es «masculino» y es justo la confusión. Por eso el desplegable
+         enseña la palabra y guarda la letra, y nadie teclea el código. */
+      n: 'sexo', l: 'Sexo', t: 'select', persona: 1,
+      op: [
+        { v: '',  l: '— Sin determinar —' },
+        { v: 'V', l: 'Hombre (V)' },
+        { v: 'H', l: 'Mujer (H)' },
+        { v: 'X', l: 'Empresa · persona jurídica (X)' }
+      ]
+    },
+    { n: 'nacimiento',    l: 'Fecha de nacimiento',    t: 'date', persona: 1 },
+    { n: 'caducidad_nif', l: 'Caducidad del DNI',      t: 'date', persona: 1 },
+
+    /* El tipo de vía se ELIGE de la lista: es lo que se guarda. El código
+       numérico de OEGAM (SIGLAS_DIRECCION) NO se rellena hasta que la
+       gestoría nos pase su tabla; hasta entonces ese tag del XML sale vacío
+       y el informe de exportación dice qué tipo de vía se eligió. */
+    { n: 'tipo_via', l: 'Tipo de vía', t: 'select', op: global.GT_TIPOS_VIA },
+    /* NOMBRE_VIA es SOLO el nombre: ni el tipo delante ni el número detrás.
+       De «SIETE VIENTOS 39 PBJ», aquí va «SIETE VIENTOS». */
+    { n: 'via',        l: 'Nombre de la vía', t: 'text', ph: 'Siete Vientos' },
+    { n: 'via_numero', l: 'Número',           t: 'text', ph: '39' },
+    { n: 'letra',      l: 'Letra del portal', t: 'text', ph: 'B' },
+    { n: 'escalera',   l: 'Escalera',         t: 'text', ph: 'Izq' },
+    { n: 'piso',       l: 'Piso',             t: 'text', ph: 'PBJ' },
+    { n: 'puerta',     l: 'Puerta',           t: 'text', ph: 'B' },
+    { n: 'municipio',  l: 'Población (municipio)', t: 'text', ph: 'Majadahonda' },
+    /* Lista cerrada de las 52: escrita a mano se cuela un nombre que ni la
+       tabla de CCAA ni la de códigos de OEGAM reconocen, y el campo acaba
+       vacío en el XML sin que se entienda por qué. */
+    { n: 'provincia',  l: 'Provincia', t: 'select',
+      op: [{ v: '', l: '— Selecciona la provincia —' }].concat(
+        (global.GT_PROVINCIAS_LISTA || []).map(p => ({ v: p, l: p }))) },
+    { n: 'cp',         l: 'Código postal', t: 'text', ph: '28220' }
+  ];
+
+  /**
+   * Los campos de persona de una parte, ya prefijados (`comprador_sexo`…).
+   * Los usan el formulario del trámite y la pestaña de exportación: si se
+   * declaran una sola vez, no pueden acabar pidiendo cosas distintas.
+   */
+  function camposPersona(parte) {
+    return CAMPOS_PERSONA_DEF.map(c => {
+      const campo = Object.assign({}, c, { n: parte + '_' + c.n });
+      delete campo.persona;
+      /* Solo dentro del formulario del trámite hay un `<parte>_tipo` que
+         consultar. En la pestaña de exportación no lo hay y se muestran
+         todos, que es lo que hacía antes de existir esta lista. */
+      if (c.persona) campo.soloSi = { campo: parte + '_tipo', valor: 'empresa', no: true };
+      return campo;
+    });
+  }
+
   /* Los datos de identidad son los mismos campos de siempre (mismas columnas):
      con vendedor particular se escriben a mano, con empresa se vuelcan. */
   const vendedorTransferencia = [
@@ -96,7 +173,7 @@
     { n: 'vendedor_nif',       l: 'DNI / NIF',          t: 'text', col: 1, ph: '11223344A',          autoSi: 'empresa', lSi: 'CIF' },
     { n: 'vendedor_direccion', l: 'Domicilio',          t: 'text', col: 1, ph: 'Av. de España 22, Madrid', autoSi: 'empresa', lSi: 'Domicilio social' },
     { n: 'vendedor_telefono',  l: 'Teléfono',           t: 'text', col: 1, ph: '600 111 222',        autoSi: 'empresa' }
-  ];
+  ].concat(camposPersona('vendedor'));
 
   const comprador = [
     { n: 'comprador_nombre',    l: 'Nombre y apellidos', t: 'text', col: 1, ph: 'María García López' },
@@ -120,7 +197,7 @@
     { n: 'comprador_nif',       l: 'DNI / NIF',          t: 'text', col: 1, ph: '12345678Z',                 lSi: 'CIF' },
     { n: 'comprador_direccion', l: 'Domicilio',          t: 'text', col: 1, ph: 'Calle Mieses 1, Majadahonda', lSi: 'Domicilio social' },
     { n: 'comprador_telefono',  l: 'Teléfono',           t: 'text', col: 1, ph: '600 333 444' }
-  ];
+  ].concat(camposPersona('comprador'));
 
   /* --- Documentos que llegan en varias caras ---
      Un DNI reparte sus datos entre las dos caras: el número y el nombre están
@@ -553,6 +630,8 @@
   global.GT_TRAMITES = TRAMITES;
   global.GTTramites = {
     PARTES: PARTES,
+    CAMPOS_PERSONA_DEF: CAMPOS_PERSONA_DEF,
+    camposPersona: camposPersona,
     tramite: tramite,
     leer: leer,
     campos: campos,

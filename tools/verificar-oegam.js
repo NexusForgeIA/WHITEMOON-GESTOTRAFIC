@@ -738,6 +738,223 @@ ok(valorDe(eST, 'FORMATO_GA/TRANSMISION/DATOS_ADQUIRIENTE/PISO_DIRECCION_ADQUIRI
 ok(soloTexto.pendientes.some(p => p.tag === 'PISO_DIRECCION_ADQUIRIENTE' && /PBJ/.test(p.motivo)),
   'y el informe enseña lo que quedó sin repartir');
 
+/* ============================================================
+   16 · Alta MANUAL · los mismos campos y el mismo XML
+   ------------------------------------------------------------
+   El gestor tiene que poder teclear a mano todo lo que Gest-IA propone. No
+   basta con que los campos existan: tienen que ser LOS MISMOS —las mismas
+   claves en `datos`—, porque si el formulario guardara en otro sitio el XML
+   saldría distinto según por dónde se hubiera dado de alta el expediente, y
+   eso no lo ve nadie hasta que la DGT devuelve el trámite.
+
+   Aquí se comprueban las tres cosas por separado: que los catálogos de los
+   desplegables los reconozcan las tablas que los van a usar, que el
+   formulario declare todos los campos, y que el XML salga IDÉNTICO.
+   ============================================================ */
+console.log('\n16 · Alta manual · los mismos campos, el mismo XML');
+
+/* --- 16.1 · Los desplegables ofrecen lo que las tablas reconocen ------- */
+console.log('\n   Catálogos de los desplegables');
+
+const PROV = globalThis.GT_PROVINCIAS_LISTA || [];
+ok(PROV.length === 52, 'el desplegable ofrece las 52 provincias', String(PROV.length));
+
+const sinCcaa = PROV.filter(p => !globalThis.GT_CCAA_DE_PROVINCIA(p));
+ok(sinCcaa.length === 0,
+  'las 52 traducen a su CCAA (de eso depende el tipo del ITP)', sinCcaa.join(', '));
+
+const motivoDe = (p) => O.codigoProvincia(p).motivo || '';
+const desconocidas = PROV.filter(p => /no está en la tabla/.test(motivoDe(p)));
+ok(desconocidas.length === 0,
+  'y las 52 las reconoce la tabla de códigos provinciales de OEGAM', desconocidas.join(', '));
+
+/* Las tres con dos códigos históricos siguen SIN resolverse solas: elegir uno
+   a ciegas es exactamente lo que prohíbe la regla de la casa. Que ahora se
+   elijan de un desplegable no cambia eso — cambia solo que el nombre entra
+   bien escrito. */
+const ambiguas = PROV.filter(p => /dos códigos históricos/.test(motivoDe(p)));
+ok(ambiguas.join(', ') === 'Baleares, Girona, Ourense',
+  'Baleares, Girona y Ourense siguen sin código: las resuelve el gestor',
+  ambiguas.join(', '));
+
+const opcionesVia = (globalThis.GT_TIPOS_VIA || []).map(t => t.v).filter(Boolean);
+const detectables = O.ETIQUETAS_TIPO_VIA;
+ok(opcionesVia.length > 0, 'el desplegable de tipo de vía tiene opciones',
+  String(opcionesVia.length));
+const viaHuerfana = opcionesVia.filter(v => detectables.indexOf(v) === -1);
+ok(viaHuerfana.length === 0,
+  'todo tipo de vía elegible es una etiqueta que el exportador conoce',
+  viaHuerfana.join(', '));
+const viaSinOpcion = detectables.filter(e => opcionesVia.indexOf(e) === -1);
+ok(viaSinOpcion.length === 0,
+  'y todo el que sabe detectar se puede elegir a mano', viaSinOpcion.join(', '));
+
+/* --- 16.2 · El formulario declara todos los campos -------------------- */
+console.log('\n   El formulario de la transferencia los declara');
+
+const nombresTr = TR.campos(trTransfer).map(c => c.n);
+TR.PARTES.forEach(p => {
+  const faltan = TR.CAMPOS_PERSONA_DEF
+    .map(c => p + '_' + c.n)
+    .filter(n => nombresTr.indexOf(n) === -1);
+  ok(faltan.length === 0,
+    `la ficha declara los ${TR.CAMPOS_PERSONA_DEF.length} campos del ${p}`, faltan.join(', '));
+});
+
+/* Lo que de verdad importa: que ningún dato propuesto por Gest-IA se quede
+   sin casilla en el alta manual. Si alguien añade un campo al perfil `dni` y
+   se olvida del formulario, ese dato solo se podría escribir con un DNI
+   delante y esto lo caza. */
+const huerfanas = Object.keys(EXP_IA.datos)
+  .filter(k => /^(comprador|vendedor)_/.test(k) && nombresTr.indexOf(k) === -1);
+ok(huerfanas.length === 0,
+  'ningún dato que propone Gest-IA se queda sin campo que lo reciba a mano',
+  huerfanas.join(', '));
+
+/* Los campos van al jsonb `datos`, no a columnas nuevas: sin migración. */
+const conColumna = TR.CAMPOS_PERSONA_DEF.filter(c => c.col);
+ok(conColumna.length === 0,
+  'ninguno pide columna propia: viven en `datos` como hasta ahora',
+  conColumna.map(c => c.n).join(', '));
+
+/* --- 16.3 · Tecleado a mano sale el MISMO XML -------------------------- */
+console.log('\n   Tecleado a mano → el mismo XML que con Gest-IA');
+
+/* Reproduce lo que hace `recoger()` en app.js: cada campo del catálogo va a
+   su columna si la tiene y al jsonb si no. Lo que se «teclea» son los mismos
+   valores que Gest-IA propuso, así que si el formulario guardara en otra
+   clave —o se dejara un campo fuera— el XML dejaría de coincidir. */
+function recogerSimulado(tr, tecleado) {
+  const fila = {}, datos = {};
+  TR.campos(tr).forEach(c => {
+    const v = tecleado[c.n];
+    if (c.col) fila[c.n] = (v === undefined ? null : v);
+    else datos[c.n] = (v === undefined ? '' : v);
+  });
+  fila.datos = datos;
+  return fila;
+}
+
+const tecleado = {};
+TR.campos(trTransfer).forEach(c => {
+  const v = TR.leer(EXP_IA, c.n);
+  if (v !== null && v !== undefined) tecleado[c.n] = v;
+});
+
+const EXP_MANUAL = Object.assign({ referencia: 'EXP-2026-0042' },
+  recogerSimulado(trTransfer, tecleado));
+
+const rManual = O.construir(EXP_MANUAL, { hoy: HOY });
+ok(rManual.xml === O.construir(EXP_IA, { hoy: HOY }).xml,
+  'el XML del alta manual es IDÉNTICO al del alta con Gest-IA');
+ok(rManual.faltan.length === 0,
+  'y no reporta ningún obligatorio pendiente', rManual.faltan.map(x => x.tag).join(', '));
+
+const pendManual = rManual.pendientes.filter(p =>
+  !/^SIGLAS_DIRECCION_/.test(p.tag) && !/^TARA/.test(p.tag));
+ok(pendManual.length === 0,
+  'ni ningún hueco de persona: rellenado a mano queda tan completo como leído',
+  pendManual.map(p => p.tag).join(', '));
+
+/* --- 16.4 · El tipo de vía elegido manda ------------------------------- */
+console.log('\n   El tipo de vía que elige el gestor');
+
+/* El domicilio del comprador («SIETE VIENTOS 39 PBJ») no lleva tipo de vía,
+   así que del texto no se detecta ninguno: lo pone el desplegable. El del
+   vendedor sí empieza por «CALLE», y aun así gana lo que eligió el gestor —
+   uno lo ha mirado una persona y el otro es un patrón sobre texto libre. */
+const conTipoVia = O.construir(Object.assign({}, EXP_MANUAL, {
+  datos: Object.assign({}, EXP_MANUAL.datos, {
+    comprador_tipo_via: 'PLAZA', vendedor_tipo_via: 'TRAVESIA'
+  })
+}), { hoy: HOY });
+
+ok(valorDe(elementos(conTipoVia.xml),
+  'FORMATO_GA/TRANSMISION/DATOS_ADQUIRIENTE/SIGLAS_DIRECCION_ADQUIRIENTE') === '',
+  'el CÓDIGO sigue vacío: esa tabla la publica OEGAM y no se inventa');
+ok(conTipoVia.pendientes.some(p =>
+  p.tag === 'SIGLAS_DIRECCION_ADQUIRIENTE' && /elegido «PLAZA»/.test(p.motivo)),
+  'pero el informe dice qué tipo de vía se eligió, para buscar su código');
+ok(conTipoVia.pendientes.some(p =>
+  p.tag === 'SIGLAS_DIRECCION_TRANSMITENTE' && /elegido «TRAVESIA»/.test(p.motivo)),
+  'y lo elegido gana a lo detectado en el texto libre («CALLE»)');
+
+/* Y cuando la tabla llegue, el código elegido llega al XML sin tocar nada
+   más. Se simula cargando UNA entrada y se deja el catálogo como estaba: la
+   comprobación 8 exige que siga vacío. */
+O.SIGLAS.PLAZA = '58';
+const conCatalogo = O.construir(Object.assign({}, EXP_MANUAL, {
+  datos: Object.assign({}, EXP_MANUAL.datos, { comprador_tipo_via: 'PLAZA' })
+}), { hoy: HOY });
+ok(valorDe(elementos(conCatalogo.xml),
+  'FORMATO_GA/TRANSMISION/DATOS_ADQUIRIENTE/SIGLAS_DIRECCION_ADQUIRIENTE') === '58',
+  'con el catálogo cargado, el tipo elegido sale como código en el XML');
+ok(!conCatalogo.pendientes.some(p => p.tag === 'SIGLAS_DIRECCION_ADQUIRIENTE'),
+  'y deja de figurar como pendiente');
+delete O.SIGLAS.PLAZA;
+ok(Object.keys(O.SIGLAS).length === 0,
+  'el catálogo se queda como estaba: vacío hasta que lo aporte la gestoría');
+
+/* --- 16.5 · Empresa: ni sexo ni nacimiento, pero sí domicilio ---------- */
+console.log('\n   Si la parte es una empresa');
+
+const campos0 = TR.camposPersona('comprador');
+const ocultosSiEmpresa = campos0
+  .filter(c => c.soloSi && c.soloSi.no && c.soloSi.valor === 'empresa')
+  .map(c => c.n.replace(/^comprador_/, ''));
+ok(ocultosSiEmpresa.join(' ') === 'nombre_pila apellido1 apellido2 sexo nacimiento caducidad_nif',
+  'se ocultan los campos de persona física (los pone el CIF y el mandato)',
+  ocultosSiEmpresa.join(' '));
+ok(campos0.every(c => !c.soloSi || c.soloSi.campo === 'comprador_tipo'),
+  'y cada campo mira el tipo de SU parte, no el de la otra');
+
+const visiblesSiEmpresa = campos0.filter(c => !c.soloSi).map(c => c.n.replace(/^comprador_/, ''));
+['tipo_via', 'via', 'via_numero', 'letra', 'escalera', 'piso', 'puerta',
+  'municipio', 'provincia', 'cp'].forEach(n => {
+  ok(visiblesSiEmpresa.indexOf(n) !== -1,
+    `el domicilio sigue pidiéndose: ${n} (una empresa también tiene domicilio social)`);
+});
+
+/* Una empresa compradora con su domicilio tecleado a mano: sexo X por serlo,
+   y el domicilio desglosado igual que el de un particular.
+
+   Se dejan A PROPÓSITO el sexo, el nacimiento y la caducidad que tenía de
+   cuando la parte era un particular. El formulario los oculta al marcar
+   «empresa» y `recoger()` los vacía, pero un expediente antiguo puede
+   traerlos: si llegan hasta aquí, no se emiten. Una fecha de nacimiento
+   colgando de una razón social es un dato falso, y de los que no revisa
+   nadie porque parece correcto. */
+const empresaManual = O.construir(Object.assign({}, EXP_MANUAL, {
+  comprador_nombre: 'EMPRESA EJEMPLO SL', comprador_nif: 'B00000001',
+  datos: Object.assign({}, EXP_MANUAL.datos, {
+    comprador_tipo: 'empresa',
+    comprador_tipo_via: 'AVENIDA', comprador_via: 'DE ESPAÑA',
+    comprador_via_numero: '22', comprador_piso: '3', comprador_puerta: 'A',
+    comprador_municipio: 'Madrid', comprador_provincia: 'Madrid', comprador_cp: '28001'
+  })
+}), { hoy: HOY });
+const eEmp = elementos(empresaManual.xml);
+const vEmp = (t) => valorDe(eEmp, 'FORMATO_GA/TRANSMISION/DATOS_ADQUIRIENTE/' + t);
+ok(vEmp('SEXO_ADQUIRIENTE') === 'X',
+  'SEXO_ADQUIRIENTE = X, y pisa el «H» que quedó de cuando era particular',
+  vEmp('SEXO_ADQUIRIENTE'));
+ok(vEmp('APELLIDO1_RAZON_SOCIAL_ADQUIRIENTE') === 'EMPRESA EJEMPLO SL',
+  'la razón social va entera en APELLIDO1_RAZON_SOCIAL');
+ok(vEmp('FECHA_NACIMIENTO_ADQUIRIENTE') === '',
+  'no lleva fecha de nacimiento: una empresa no nace', vEmp('FECHA_NACIMIENTO_ADQUIRIENTE'));
+ok(vEmp('FECHA_CADUCIDAD_NIF_ADQUIRIENTE') === '',
+  'ni caducidad de DNI: un CIF no caduca', vEmp('FECHA_CADUCIDAD_NIF_ADQUIRIENTE'));
+ok(!empresaManual.avisos.some(a => a.tipo === 'dni_caducado'),
+  'ni salta el aviso de DNI caducado por una fecha que ya no aplica');
+[['NOMBRE_VIA_DIRECCION_ADQUIRIENTE', 'DE ESPAÑA'], ['NUMERO_DIRECCION_ADQUIRIENTE', '22'],
+  ['PISO_DIRECCION_ADQUIRIENTE', '3'], ['PUERTA_DIRECCION_ADQUIRIENTE', 'A'],
+  ['MUNICIPIO_ADQUIRIENTE', 'MADRID'], ['PROVINCIA_ADQUIRIENTE', 'M'],
+  ['CP_ADQUIRIENTE', '28001']].forEach(([tag, esperado]) => {
+  ok(vEmp(tag) === esperado, `${tag} = ${esperado}`, vEmp(tag));
+});
+ok(empresaManual.pendientes.some(p => p.tag === 'DNI_REPRESENTANTE_ADQUIRIENTE'),
+  'el representante sigue siendo cosa del poder o del mandato, no del formulario');
+
 /* ============================================================ */
 console.log('\n' + '='.repeat(52));
 if (fallos) {

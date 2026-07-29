@@ -66,10 +66,13 @@
     }
   };
 
-  /* Campos del DNI que viven en `datos` y no están en el formulario del
-     trámite. Se completan y se corrigen en la pestaña de exportación, que es
-     donde importan; meterlos en la ficha serían treinta campos más que casi
-     nadie tocaría. */
+  /* Campos del DNI que viven en `datos` en lugar de en una columna propia.
+     La transferencia los declara en su formulario (ver `camposPersona` en
+     tramites.js), así que ahí se escriben a mano en el alta manual y se
+     revisan cuando los propone Gest-IA. Los trámites que NO los declaran
+     —una notificación de venta no exporta a OEGAM— los siguen recibiendo
+     igualmente: por eso esta lista entra en EXTRA y `proponer` no los
+     descarta por no encontrarlos en el catálogo del trámite. */
   const CAMPOS_PERSONA = [
     'nombre_pila', 'apellido1', 'apellido2', 'sexo', 'nacimiento', 'caducidad_nif',
     'via', 'via_numero', 'escalera', 'piso', 'puerta', 'letra',

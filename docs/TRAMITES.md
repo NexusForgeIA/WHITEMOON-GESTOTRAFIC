@@ -61,16 +61,51 @@ formulario, ni el Kanban, ni la subida de documentos, ni la base de datos.
 | `def` | valor por defecto |
 | `paso` | `step` para números |
 | `full` | ocupa el ancho completo |
-| `soloSi` | `{campo, valor}` → el campo solo se muestra si otro campo tiene ese valor |
+| `soloSi` | `{campo, valor}` → el campo solo se muestra si otro campo tiene ese valor. Con `no: 1` se invierte: se muestra si **no** vale eso |
 | `autoSi` | el campo lo rellena la aplicación (solo lectura) en ese modo |
 | `lSi` | etiqueta alternativa cuando el campo está en modo `autoSi` |
 
 `t: 'empresa'` renderiza un desplegable con los **clientes de tipo empresa**
 del CRM. Se usa para elegir la empresa vendedora de una transferencia.
 
+Un campo **oculto no se guarda**: `recoger()` lo vacía. Si el gestor rellena el
+sexo y el nacimiento de un particular y luego marca esa parte como empresa,
+esos campos desaparecen del formulario y su valor **no** se queda colgando en
+`datos` para acabar en el XML de una razón social.
+
 **Regla práctica:** usa `col: 1` solo si el campo se consulta o se lista (marca,
 modelo, matrícula, titular…). Todo lo específico de un trámite va a `datos`,
 que es lo que evita tener que migrar la base de datos por cada trámite nuevo.
+
+### Los campos de persona y domicilio
+
+La transferencia añade a cada parte —vendedor y comprador— los campos que pide
+OEGAM y que Gest-IA propone al leer un DNI: nombre y apellidos por separado,
+**sexo**, **fecha de nacimiento**, **caducidad del DNI** y el **domicilio
+desglosado** (tipo de vía, nombre, número, letra, escalera, piso, puerta,
+población, provincia y CP).
+
+Se declaran **una sola vez**, en `CAMPOS_PERSONA_DEF` / `camposPersona()` de
+`tramites.js`, y de ahí los pintan tanto el formulario del trámite como la
+pestaña de exportación a OEGAM. Esa es la razón de que exista el helper: **un
+alta manual y un alta con Gest-IA tienen que rellenar exactamente lo mismo**, o
+el XML saldría distinto según por dónde se creara el expediente — y eso no lo
+ve nadie hasta que la DGT devuelve el trámite.
+
+Dos de ellos son desplegables de lista cerrada, y no por comodidad:
+
+- **Tipo de vía** (`GT_TIPOS_VIA`): guarda la **etiqueta** (`CALLE`,
+  `AVENIDA`…), que es la clave con la que se buscará el **código** de OEGAM
+  cuando la gestoría nos pase su tabla. El código **no se inventa** mientras
+  tanto. Ver [OEGAM](OEGAM.md).
+- **Provincia** (`GT_PROVINCIAS_LISTA`, las 52): escrita a mano se colaba un
+  nombre que ni la tabla de CCAA ni la de códigos provinciales reconocen, y el
+  campo acababa vacío en el XML sin que se entendiera por qué.
+
+Los seis campos de identidad personal llevan
+`soloSi: { campo: '<parte>_tipo', valor: 'empresa', no: 1 }`: desaparecen si esa
+parte es una empresa. El **domicilio no**, porque una empresa también tiene
+domicilio social y OEGAM lo pide desglosado igual.
 
 ### Documentos
 
