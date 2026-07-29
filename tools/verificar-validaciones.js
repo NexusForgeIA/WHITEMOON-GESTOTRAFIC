@@ -284,6 +284,61 @@ ok(!/\bZ\b/.test(avisoNif.texto.replace('12345678A', '')),
   avisoNif.texto);
 ok(/documento delante/.test(avisoNif.texto), 'y manda mirar el documento', avisoNif.texto);
 
+/* ============================================================
+   10 · Los datos de vehículo de la DEMO
+   ------------------------------------------------------------
+   Igual que los NIF del punto 1: son ficticios, pero están elegidos para
+   PASAR. Dos expedientes de demostración se quedaron a medias —uno sin
+   vehículo y una baja temporal sin motivo— y quien abría la demo veía un
+   aviso encima antes que nada.
+
+   Los datos viven en la base de la demo, no en el repo, así que lo que se
+   puede fijar aquí es que las cifras concretas que se eligieron siguen
+   siendo válidas. Si alguien las retoca a ojo, salta aquí y no en la demo.
+   ============================================================ */
+console.log('\n10 · Datos de vehículo de la demo');
+
+/* EXP-2026-0013 · la transferencia que estaba vacía. */
+ok(V.matricula('1234 KLM').valido === true, '1234 KLM es una matrícula europea válida');
+ok(V.bastidor('VSSZZZ5FZLR123456').valido === true,
+  'VSSZZZ5FZLR123456 · 17 caracteres y sin I, O ni Q',
+  V.bastidor('VSSZZZ5FZLR123456').motivo);
+
+const demo13 = {
+  marca: 'SEAT', modelo: 'LEON', matricula: '1234 KLM',
+  fecha_matriculacion: '2019-06-15', ccaa: 'Comunidad de Madrid',
+  datos: { bastidor: 'VSSZZZ5FZLR123456' }
+};
+ok(V.revisar(demo13, trTransfer).length === 0,
+  'EXP-2026-0013 con su vehículo asignado no genera ningún aviso',
+  JSON.stringify(V.revisar(demo13, trTransfer).map(a => a.campo + ': ' + a.texto)));
+
+/* La `ccaa` es obligatoria y NO se hereda del `def` del formulario: un
+   expediente guardado sin ella avisa igual que si faltara la matrícula. */
+const demo13SinCcaa = Object.assign({}, demo13, { ccaa: null });
+ok(V.revisar(demo13SinCcaa, trTransfer).some(a => a.campo === 'ccaa'),
+  'y sin CCAA vuelve a avisar: el valor por defecto del formulario no cuenta');
+
+/* EXP-2026-0015 · la baja temporal sin motivo. El titular es el del
+   buscador, con su letra ya correcta desde el arreglo de los NIF. */
+const demo15 = {
+  marca: 'RENAULT', modelo: 'MEGANE 1.3 TCe LIMITED', matricula: '4821 NBH',
+  titular_nombre: 'ALEJANDRO SAAVEDRA MONTORO', titular_nif: '71640935Y',
+  datos: { motivo: 'no_uso' }
+};
+ok(V.revisar(demo15, bajaT).length === 0,
+  'EXP-2026-0015 con el motivo puesto no genera ningún aviso',
+  JSON.stringify(V.revisar(demo15, bajaT).map(a => a.campo + ': ' + a.texto)));
+
+/* El motivo sale de una lista CERRADA. Un texto libre por bonito que sea
+   deja el desplegable sin nada seleccionado y el siguiente guardado lo
+   borra: el aviso se iría de la vista sin que el dato exista de verdad.
+   Por eso lo que se guarda es la clave del catálogo, no la frase. */
+ok(TR.etiquetaOpcion(TR.campos(bajaT).find(c => c.n === 'motivo'), 'no_uso')
+   === 'Vehículo sin uso temporal',
+  'y «no_uso» es una clave del catálogo, con su etiqueta',
+  TR.etiquetaOpcion(TR.campos(bajaT).find(c => c.n === 'motivo'), 'no_uso'));
+
 /* ============================================================ */
 console.log('\n' + '='.repeat(52));
 if (fallos) {
