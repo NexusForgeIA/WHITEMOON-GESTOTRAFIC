@@ -2,7 +2,7 @@
    GestoTrafic · gestotrafic-expediente
    ------------------------------------------------------------
    Reúne toda la documentación de un expediente en UN documento,
-   en dos formatos:
+   en el formato que se pida:
 
      · HTML  — autocontenido, para el acceso de expedientes del
                Colegio. Las imágenes van embebidas en base64 y los
@@ -12,14 +12,17 @@
                y los PDF aportados se anexan PÁGINA A PÁGINA con
                pdf-lib, no como una miniatura.
 
+   El documento se devuelve EN EL CUERPO de la respuesta. Solo se
+   escribe en el bucket si se pide guardar copia, y entonces se
+   registra también su fila: nunca un fichero sin fila que lo
+   reclame.
+
    Por qué vive aquí y no en el cliente:
      · los documentos están en un bucket PRIVADO y se bajan con el
        service_role, sin repartir URLs firmadas de cada archivo
      · se vuelve a comprobar en el servidor que quien llama es un
        usuario activo y que el expediente es suyo (o es admin),
        igual que hace el RLS
-     · el resultado se sube al mismo bucket privado y lo único que
-       sale de aquí son dos URLs firmadas que caducan
 
    REGLA DE LA CASA · lo que falta, falta. Un documento que no se
    ha aportado NO genera una página en blanco ni un hueco disimulado:
@@ -124,6 +127,13 @@ function winansi(s: string): string {
     .replace(/[^\x00-\xFF]/g, '?');
 }
 
+/** Importe en euros, formato español. `null` si no hay número que enseñar. */
+function eur(v: unknown): string | null {
+  const n = typeof v === 'number' ? v : Number(v);
+  if (v === null || v === undefined || v === '' || isNaN(n)) return null;
+  return n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+}
+
 /* ---------------- Portada · datos ---------------- */
 
 type Cabecera = {
@@ -148,9 +158,37 @@ function filasCabecera(exp: Record<string, any>, cab: Cabecera, tramite: string)
     ['Vendedor', exp.vendedor_nombre],
     ['NIF del vendedor', exp.vendedor_nif],
     ['Cliente del expediente', nombreCliente],
+    ...filasITP(exp),
     ['Fecha de apertura', exp.created_at ? fechaLarga(exp.created_at) : null],
     ['Fecha de este documento', fechaLarga(null)]
   ] as [string, unknown][];
+}
+
+/* ---------------- Portada · el ITP liquidado ----------------
+   Los mismos importes que enseña la ficha del CRM y que se guardaron al
+   calcular. Salen de las columnas del expediente, no se recalculan aquí:
+   recalcular en el documento sería tener dos motores que pueden discrepar.
+
+   ⛔ ANTI-INVENCIÓN · la prueba de que se calculó es `calculo_json`, la
+   respuesta literal del motor. NO vale mirar `itp_importe`: el toggle de
+   exención lo pone a 0 sin que nadie haya calculado nada, y este documento se
+   presenta ante el Colegio. Sin cálculo, la portada lo DICE en vez de enseñar
+   una cifra: un hueco declarado se ve, una cifra aproximada no. */
+function filasITP(exp: Record<string, any>): [string, unknown][] {
+  if (exp.tipo_tramite !== 'transferencia') return [];
+
+  if (!exp.calculo_json) {
+    return [['ITP de la transmisión', 'PENDIENTE DE CALCULAR']];
+  }
+
+  const exento = !!(exp.datos && exp.datos.itp_exento);
+  return [
+    ['Valor venal (Anexo IV)', eur(exp.valor_venal)],
+    ['Base imponible', eur(exp.base_imponible)],
+    ['ITP de la transmisión', exento ? 'EXENTO · venta con factura sujeta a IVA' : eur(exp.itp_importe)],
+    ['Tasa DGT', eur(exp.tasa_dgt)],
+    ['Total a liquidar', eur(exp.total_impuestos)]
+  ];
 }
 
 /* ---------------- HTML autocontenido ---------------- */

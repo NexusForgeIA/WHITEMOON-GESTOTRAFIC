@@ -822,6 +822,33 @@ tbody tr.clickable:hover { background: rgba(124, 77, 255, .07); }
 .badge-exento { background: rgba(0, 212, 170, .15); color: var(--g); }
 .badge-admin  { background: rgba(124, 77, 255, .17); color: var(--p2); }
 .badge-gestor { background: rgba(92, 170, 255, .15); color: #7cb8ff; }
+/* ---------------- El ITP calculado, fijo en la ficha ---------------- */
+/* Va fuera de las pestañas: un expediente en tramitación tiene que enseñar
+   lo que se liquida sin que nadie entre en la calculadora. */
+.itp-ficha {
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+.itp-ficha-pie {
+  font-size: .73rem; color: var(--muted); line-height: 1.6;
+  margin: 11px 0 0;
+}
+.itp-ficha-pie b { color: var(--g); font-weight: 600; }
+
+/* Sin cálculo no hay cifras: un hueco declarado se ve, una cifra a ojo no. */
+.itp-ficha.vacia {
+  display: flex; align-items: flex-start; gap: 11px;
+  font-size: .79rem; line-height: 1.6; color: var(--muted);
+  border-style: dashed;
+  border-color: var(--border-2);
+  background: rgba(8, 8, 16, .36);
+}
+.itp-ficha.vacia svg { width: 18px; height: 18px; flex: none; margin-top: 1px; color: var(--muted); }
+.itp-ficha.vacia b { color: var(--text); font-weight: 600; }
+
 .itp-exento { color: var(--g); }
 .itp-cell.exento { border-color: rgba(0, 212, 170, .4); background: rgba(0, 212, 170, .07); }
 .itp-exento-nota {
