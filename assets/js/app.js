@@ -312,7 +312,8 @@
 
     return `<div class="field ${c.full || c.t === 'textarea' ? 'full' : ''}"
       data-campo="${h(c.n)}"
-      ${c.soloSi ? `data-solo-si="${h(c.soloSi.campo)}" data-solo-si-val="${h(c.soloSi.valor)}"` : ''}
+      ${c.soloSi ? `data-solo-si="${h(c.soloSi.campo)}" data-solo-si-val="${h(c.soloSi.valor)}"
+        ${c.soloSi.no ? 'data-solo-si-no="1"' : ''}` : ''}
       ${c.autoSi ? `data-auto-si="${h(c.autoSi)}"` : ''}>
       <label for="${id}" data-l="${h(c.l)}" ${c.lSi ? `data-l-si="${h(c.lSi)}"` : ''}>${h(c.l)}${c.req ? ' *' : ''}</label>${control}</div>`;
   }
@@ -348,6 +349,15 @@
     T.campos(tr).forEach(c => {
       let v = c.t === 'number' ? num(root, c.n) : val(root, c.n);
       if (c.t === 'number' && (v === null || isNaN(v))) v = null;
+
+      /* Un campo OCULTO no se guarda: se vacía. Si el gestor rellena el sexo
+         y la fecha de nacimiento de un particular y luego marca esa parte
+         como empresa, esos campos desaparecen del formulario —una razón
+         social no tiene ni lo uno ni lo otro—, pero su valor seguiría en el
+         DOM y acabaría en el XML colgando de una empresa. */
+      const campo = root.querySelector(`[data-campo="${c.n}"]`);
+      if (campo && campo.classList.contains('hidden')) v = null;
+
       if (c.col) fila[c.n] = v; else datos[c.n] = v;
     });
     fila.datos = datos;
@@ -391,9 +401,15 @@
     }
 
     function sincronizar(volcarAhora) {
+      /* `data-solo-si-no` invierte la condición: el campo se ve mientras el
+         otro NO valga eso. Es lo que oculta sexo, nacimiento y caducidad
+         cuando la parte es una empresa. Sin dependencia a la vista se
+         muestra el campo: es lo que hace la pestaña de exportación, que no
+         tiene el selector de tipo de parte y los enseña todos. */
       root.querySelectorAll('[data-solo-si]').forEach(f => {
         const dep = root.querySelector(`[name="${f.dataset.soloSi}"]`);
-        f.classList.toggle('hidden', !dep || dep.value !== f.dataset.soloSiVal);
+        const igual = !!dep && dep.value === f.dataset.soloSiVal;
+        f.classList.toggle('hidden', f.dataset.soloSiNo ? igual : !igual);
       });
 
       // Cada campo sigue al tipo de SU parte, no al del vendedor.
@@ -2413,38 +2429,14 @@
      están en el expediente cargado, así que no hay Edge Function, no se
      escribe en el bucket y no queda ningún huérfano que alguien tenga que
      ir a borrar. El archivo solo existe en la descarga del gestor. */
-  /* Los campos de persona que pide OEGAM y que el CRM no tenía: los rellena
-     Gest-IA leyendo el DNI a dos caras, y se corrigen aquí.
+  /* Los campos de persona y domicilio que pide OEGAM salen del catálogo
+     (`GTTramites.camposPersona`), que es EL MISMO que pinta el formulario del
+     trámite. Declararlos una vez es lo que garantiza que el alta manual y el
+     alta con Gest-IA rellenen exactamente lo mismo.
 
-     Van en esta pestaña y no en la ficha a propósito. Son treinta campos
-     entre las dos partes, casi siempre ya rellenos por Gest-IA, y solo
-     importan al exportar: en el formulario del trámite serían tres pantallas
-     de scroll que nadie mira. Aquí están donde el informe dice qué falta. */
-  const CAMPOS_OEGAM = [
-    { n: 'nombre_pila',   l: 'Nombre',            t: 'text' },
-    { n: 'apellido1',     l: 'Primer apellido',   t: 'text' },
-    { n: 'apellido2',     l: 'Segundo apellido',  t: 'text' },
-    {
-      n: 'sexo', l: 'Sexo', t: 'select',
-      op: [
-        { v: '',  l: '— Sin determinar —' },
-        { v: 'V', l: 'V · Hombre' },
-        { v: 'H', l: 'H · Mujer' },
-        { v: 'X', l: 'X · Persona jurídica' }
-      ]
-    },
-    { n: 'nacimiento',    l: 'Fecha de nacimiento', t: 'date' },
-    { n: 'caducidad_nif', l: 'Caducidad del DNI',   t: 'date' },
-    { n: 'via',           l: 'Nombre de la vía',    t: 'text', ph: 'SIETE VIENTOS' },
-    { n: 'via_numero',    l: 'Número',              t: 'text', ph: '39' },
-    { n: 'letra',         l: 'Letra del portal',    t: 'text' },
-    { n: 'escalera',      l: 'Escalera',            t: 'text' },
-    { n: 'piso',          l: 'Piso',                t: 'text', ph: 'PBJ' },
-    { n: 'puerta',        l: 'Puerta',              t: 'text' },
-    { n: 'municipio',     l: 'Municipio',           t: 'text' },
-    { n: 'provincia',     l: 'Provincia',           t: 'text', ph: 'Madrid' },
-    { n: 'cp',            l: 'Código postal',       t: 'text', ph: '28220' }
-  ];
+     Esta pestaña sigue existiendo porque es donde el informe dice qué falta:
+     aquí se corrige lo que Gest-IA leyó mal con el XML delante. Lo que ya no
+     hace es ser el ÚNICO sitio donde se pueden escribir. */
 
   function panelOegam(exp, tr, cont) {
     const r = GTOegam.construir(exp, { clientes: fichas });
@@ -2453,15 +2445,13 @@
     const filas = (lista) => lista.map(x => `
       <li><span class="t-mono">${h(x.tag)}</span> · ${h(x.motivo || x.etiqueta || '')}</li>`).join('');
 
-    /* Un bloque de campos por parte. Los nombres llevan el prefijo de la
-       parte, que es exactamente la clave con la que viven en `datos`. */
+    /* Un bloque de campos por parte. `camposPersona` los devuelve ya con el
+       prefijo de la parte, que es exactamente la clave con la que viven en
+       `datos` y con la que los guarda el formulario del trámite. */
     const bloquePersona = (prefijo, titulo) => `
       <div class="form-sec">${h(titulo)}</div>
       <div class="form-grid">
-        ${CAMPOS_OEGAM.map(c => campoHTML(
-          Object.assign({}, c, { n: prefijo + '_' + c.n }),
-          T.leer(exp, prefijo + '_' + c.n)
-        )).join('')}
+        ${T.camposPersona(prefijo).map(c => campoHTML(c, T.leer(exp, c.n))).join('')}
       </div>`;
 
     cont.innerHTML = `
@@ -2559,12 +2549,11 @@
       /* Todo esto vive en `datos` (jsonb): son campos sin columna propia, así
          que no hay migración que aplicar ni columna que se quede a medias. */
       const datos = Object.assign({}, exp.datos || {});
-      ['comprador', 'vendedor'].forEach(p => CAMPOS_OEGAM.forEach(c => {
-        const campo = p + '_' + c.n;
-        const el = form.querySelector('[name="' + campo + '"]');
+      ['comprador', 'vendedor'].forEach(p => T.camposPersona(p).forEach(c => {
+        const el = form.querySelector('[name="' + c.n + '"]');
         if (!el) return;
         const v = (el.value || '').trim();
-        if (v) datos[campo] = v; else delete datos[campo];
+        if (v) datos[c.n] = v; else delete datos[c.n];
       }));
 
       btn.disabled = true;

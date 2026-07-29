@@ -83,10 +83,23 @@ no la lectura de ningún documento.
 | `EXENTO_ITP` | toggle «Operación con factura» de la pestaña de ITP |
 | `JEFATURA_PROVINCIAL` | provincia de la gestoría |
 
-**Orden de preferencia** para los datos de una persona: (1) lo que Gest-IA leyó
-de su **DNI**, o lo que el gestor corrigió encima; (2) su **ficha de cliente**
-del CRM, cruzada por NIF exacto; (3) el domicilio en **texto libre**, del que
-solo se saca vía, número y CP. Lo que no salga de ninguna, vacío y marcado.
+**Orden de preferencia** para los datos de una persona: (1) lo que **hay en el
+expediente** —lo escriba el gestor en la ficha o lo lea Gest-IA de su DNI—; (2)
+su **ficha de cliente** del CRM, cruzada por NIF exacto; (3) el domicilio en
+**texto libre**, del que solo se saca vía, número y CP. Lo que no salga de
+ninguna, vacío y marcado.
+
+Los dos caminos —alta manual y alta con Gest-IA— escriben **las mismas claves**
+en `datos`, así que el XML sale igual por los dos. El catálogo de esos campos se
+declara **una sola vez** (`camposPersona` en
+[`assets/js/tramites.js`](../assets/js/tramites.js)) y de ahí lo pintan tanto el
+formulario del trámite como la pestaña de exportación.
+
+Una excepción deliberada: si la parte es una **empresa**, el XML no lleva sexo
+—va `X` por ser persona jurídica—, ni fecha de nacimiento, ni caducidad de NIF,
+**aunque el expediente los traiga** de cuando esa parte era un particular. Una
+fecha de nacimiento colgando de una razón social es un dato falso, y de los que
+no revisa nadie porque parecen correctos.
 
 ### b · Lo que asigna OEGAM/DGT al importar · **siempre vacíos**
 
@@ -109,10 +122,11 @@ El panel enseña esta lista **con el motivo de cada hueco** antes de descargar,
 avisa aparte de los **campos obligatorios** que falten, y trae un formulario
 —«Datos de las personas»— para corregir o completar lo que Gest-IA propuso.
 
-Ese formulario vive en la pestaña de exportación y no en la ficha a propósito:
-son treinta campos entre las dos partes, casi siempre ya rellenos, que solo
-importan al exportar. En el formulario del trámite serían tres pantallas de
-scroll que nadie mira.
+Ese formulario **ya no es el único sitio** donde se pueden escribir: la ficha
+del expediente declara los mismos campos, así que un alta **manual** —sin subir
+un solo documento— llega al XML igual de completa que una con Gest-IA. Sigue
+existiendo aquí porque es donde el informe dice qué falta: es el sitio para
+corregir con el XML delante.
 
 ---
 
@@ -137,9 +151,17 @@ Es un solo objeto:
 const SIGLAS = { CALLE: '41', AVENIDA: '02', PLAZA: '58', … };
 ```
 
-Mientras esté vacío, el tag sale vacío y el informe dice qué tipo de vía se
-ha detectado en cada dirección, para que el gestor busque el código sin
-releer el domicilio.
+Las **claves** de ese objeto son las etiquetas de `GT_TIPOS_VIA`
+([`assets/js/config.js`](../assets/js/config.js)), que es lo que ofrece el
+desplegable «Tipo de vía» de la ficha. El gestor **elige la etiqueta** y esa
+elección se guarda; lo que no se rellena hasta que llegue la tabla es el
+**código**. `tools/verificar-oegam.js` comprueba que el desplegable y lo que el
+exportador sabe detectar no se separen.
+
+Mientras `SIGLAS` esté vacío, el tag sale vacío y el informe dice qué tipo de
+vía se ha **elegido** en cada dirección (o **detectado** en el texto libre, si
+nadie lo eligió), para que el gestor busque el código sin releer el domicilio.
+En cuanto se cargue la tabla, esos códigos salen solos sin tocar nada más.
 
 ### 2 · Tres provincias con dos códigos
 
@@ -282,7 +304,7 @@ puesto para que añadir otro sea añadir un módulo:
 node tools/verificar-oegam.js
 ```
 
-142 comprobaciones. Genera el XML del caso de la plantilla —empresa compra a
+194 comprobaciones. Genera el XML del caso de la plantilla —empresa compra a
 particular— y comprueba, entre otras cosas, que tiene **las mismas 162
 etiquetas, en el mismo orden y con el mismo anidamiento**, que los campos de
 OEGAM van vacíos, que las constantes valen lo que en la plantilla, que las dos
@@ -295,6 +317,15 @@ cadena real —`GTGestIA.propuestas` → `aExpediente` → `GTOegam.construir`�
 un campo se escribe a mano en el expediente, así que si el mapeo se rompe por
 el camino, esto se cae. Comprueba que el XML sale completo y que **lo único que
 queda pendiente son los `SIGLAS_DIRECCION`**.
+
+Y la misma prueba **por el camino manual**: se rellena el formulario del trámite
+a mano —campo a campo, tal y como los reparte `recoger()` entre columnas y
+`datos`— y se comprueba que el XML resultante es **idéntico** al del alta con
+Gest-IA. Además, que las 52 provincias del desplegable las reconocen **las dos**
+tablas (la de CCAA y la de códigos provinciales), que los tipos de vía
+elegibles son exactamente los que el exportador sabe detectar, y que una parte
+marcada como empresa no arrastra sexo, nacimiento ni caducidad de cuando era un
+particular.
 
 Sale con código 1 a la primera discrepancia.
 
