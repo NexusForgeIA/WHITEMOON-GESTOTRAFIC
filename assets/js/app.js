@@ -1032,6 +1032,57 @@
     }));
   }
 
+  /* ------------------------------------------------------------
+     El ITP calculado, fijo en la ficha
+     ------------------------------------------------------------
+     El importe se guarda desde que se calcula (columnas `valor_venal`,
+     `itp_importe`, `tasa_dgt`, `total_impuestos` + el `calculo_json` íntegro
+     del motor). Lo que faltaba era verlo sin entrar en la calculadora: un
+     expediente en tramitación tiene que enseñar lo que se liquida.
+
+     ⛔ ANTI-INVENCIÓN · la prueba de que hay cálculo es `calculo_json`, que es
+     la respuesta literal del motor. NO vale mirar `itp_importe`: el toggle de
+     exención lo pone a 0 sin haber calculado nada, y un «0,00 €» con pinta de
+     cifra buena es justo lo que no puede aparecer en una ficha. Sin cálculo se
+     dice que falta calcularlo, que es un hueco que se ve. */
+  const itpCalculado = (exp) => !!(exp && exp.calculo_json);
+
+  /** La tira de importes de la ficha, o el aviso de que falta calcular. */
+  function fichaITP(exp, tr) {
+    if (!tr || tr.calculo !== 'itp') return '';
+
+    if (!itpCalculado(exp)) {
+      return `<div class="itp-ficha vacia">
+        ${svg('<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>')}
+        <div><b>ITP sin calcular.</b> El expediente no lleva importe todavía:
+          calcúlalo en <b>Calculadora ITP</b>. No se rellena a ojo.</div>
+      </div>`;
+    }
+
+    const exento = T.esExentoITP(exp);
+    const celda = (valor, etiqueta, clase) => `
+      <div class="itp-cell ${clase || ''}">
+        <div class="itp-cell-num">${valor}</div>
+        <div class="itp-cell-lbl">${h(etiqueta)}</div>
+      </div>`;
+
+    return `<div class="itp-ficha">
+      <div class="itp-out" style="margin:0">
+        ${celda(exp.valor_venal != null ? eur(exp.valor_venal) : '—', 'Valor venal')}
+        ${celda(exento ? '<span class="itp-exento">Exento</span>'
+          : (exp.itp_importe != null ? eur(exp.itp_importe) : '—'), 'ITP', exento ? 'exento' : '')}
+        ${celda(exp.tasa_dgt != null ? eur(exp.tasa_dgt) : '—', 'Tasa DGT')}
+        ${celda(exp.total_impuestos != null ? eur(exp.total_impuestos) : '—', 'Total', 'total')}
+      </div>
+      <p class="itp-ficha-pie">
+        Calculado con el motor <span class="t-mono">gestotrafic-itp</span>
+        ${exp.calculado_at ? '· ' + h(fecha(exp.calculado_at)) : ''}
+        ${exento ? '· <b>exención confirmada por el gestor</b>: el ITP queda en 0 y solo se liquida la tasa DGT' : ''}
+        · el mismo importe va al expediente completo.
+      </p>
+    </div>`;
+  }
+
   /* ============================================================
      VISTA · DETALLE DE EXPEDIENTE
      ============================================================ */
@@ -1073,6 +1124,8 @@
 
       ${bannerGestIA(exp)}
 
+      <div id="slot-itp">${fichaITP(exp, tr)}</div>
+
       <div class="tabs" id="tabs">
         ${pestanas.map((p, i) => `<button class="tab ${i === 0 ? 'active' : ''}" data-tab="${p.id}">${h(p.label)}</button>`).join('')}
       </div>
@@ -1082,9 +1135,16 @@
 
     activarBannerGestIA(exp, tr);
 
+    /* La tira vive fuera de las pestañas, así que hay que repintarla cuando el
+       cálculo cambia: al calcular y al marcar o retirar la exención. */
+    const pintarFichaITP = () => {
+      const slot = view.querySelector('#slot-itp');
+      if (slot) slot.innerHTML = fichaITP(exp, tr);
+    };
+
     const cont = view.querySelector('#tab-content');
     const paneles = {
-      itp: () => panelITP(exp, cont),
+      itp: () => panelITP(exp, cont, pintarFichaITP),
       datos: () => panelDatos(exp, tr, cont),
       docs: () => panelDocs(exp, tr, docs, cont),
       genera: () => panelGenera(exp, tr, docs, cont),
@@ -1581,7 +1641,7 @@
   }
 
   /* ---------- Panel: Calculadora ITP (solo transferencia) ---------- */
-  function panelITP(exp, cont) {
+  function panelITP(exp, cont, onCambio) {
     const vendeEmpresa = T.esVendedorEmpresa(exp);
     cont.innerHTML = `
       <div class="detail-grid">
@@ -1714,6 +1774,9 @@
              venta con factura de empresa sujeta a IVA. El ITP del expediente queda en <b>0,00 €</b>
              y el total se reduce a la tasa DGT.</div>` + base
         : base;
+
+      // La ficha enseña los mismos importes: se repinta de la misma fuente.
+      if (onCambio) onCambio();
     }
     pintarResultado();
 
@@ -1864,6 +1927,8 @@
           potencia_kw: payload.potencia_kw
         });
 
+        const calculadoAt = new Date().toISOString();
+
         await GTApi.actualizarExpediente(exp.id, {
           datos: datosVeh,
           valor_boe: valorBoeUsado,
@@ -1880,14 +1945,22 @@
           tasa_dgt: r.tasa_dgt,
           total_impuestos: totalFinal,
           calculo_json: r,
-          calculado_at: new Date().toISOString()
+          calculado_at: calculadoAt
         });
 
+        /* El expediente en memoria tiene que quedar EXACTAMENTE como el
+           guardado: de él se pintan la ficha, el XML de OEGAM y el expediente
+           completo sin volver a consultar. Si aquí faltara un campo, la
+           pantalla enseñaría una cifra y la base de datos otra. */
         Object.assign(exp, {
           datos: datosVeh,
           valor_boe: valorBoeUsado, precio_contrato: payload.precio_contrato,
-          valor_venal: r.valor_venal, itp_importe: itpFinal, tasa_dgt: r.tasa_dgt,
-          total_impuestos: totalFinal, calculo_json: r
+          fecha_matriculacion: payload.fecha_matriculacion, ccaa: payload.ccaa,
+          cilindrada: payload.cilindrada, cvf: payload.cvf,
+          etiqueta_dgt: payload.etiqueta_dgt, uso_especial: payload.uso_especial,
+          valor_venal: r.valor_venal, base_imponible: r.base_imponible,
+          itp_importe: itpFinal, tasa_dgt: r.tasa_dgt,
+          total_impuestos: totalFinal, calculo_json: r, calculado_at: calculadoAt
         });
 
         pintarResultado();
@@ -2478,7 +2551,21 @@
             <small class="t-muted">(${exento
               ? 'lo marcó el gestor en la pestaña de ITP'
               : 'sin exención confirmada'})</small></dd>
+          <dt>Importe liquidado</dt><dd>${itpCalculado(exp)
+            ? `ITP <b>${exento ? 'exento' : eur(exp.itp_importe)}</b>
+               · tasa DGT <b>${eur(exp.tasa_dgt)}</b>
+               · total <b>${eur(exp.total_impuestos)}</b>`
+            : '<span class="t-muted">pendiente de calcular en la pestaña de ITP</span>'}</dd>
         </dl>
+
+        <p class="t-muted" style="font-size:.76rem;margin:-6px 0 18px">
+          Ese importe <b>no viaja en el XML</b>, y no es un olvido:
+          <span class="t-mono">FORMATO_GA</span> no tiene ningún campo de importe
+          —solo <span class="t-mono">MODELO_ITP</span>,
+          <span class="t-mono">EXENTO_ITP</span> y
+          <span class="t-mono">NO_SUJETO_ITP</span>—, así que la cuota se
+          autoliquida aparte. Se enseña aquí para cuadrarla antes de importar.
+        </p>
 
         ${r.avisos.map(a => `<div class="regul-note" style="margin-bottom:14px">
           ${svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>')}
