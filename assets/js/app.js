@@ -1098,6 +1098,10 @@
 
     const pestanas = [];
     if (tr.calculo === 'itp') pestanas.push({ id: 'itp', label: 'Calculadora ITP' });
+    /* Junto al ITP, pero aparte: lo que se liquida a Hacienda y lo que se le
+       cobra al cliente son cuentas distintas y mezclarlas es lo que acaba
+       metiendo la tasa DGT en la base del IVA. */
+    if (tr.calculo === 'itp') pestanas.push({ id: 'honorarios', label: 'Honorarios y total' });
     pestanas.push({ id: 'datos', label: 'Datos del expediente' });
     pestanas.push({ id: 'docs', label: 'Documentación' });
     if (tr.genera === 'contrato') pestanas.push({ id: 'genera', label: 'Contrato' });
@@ -1145,6 +1149,7 @@
     const cont = view.querySelector('#tab-content');
     const paneles = {
       itp: () => panelITP(exp, cont, pintarFichaITP),
+      honorarios: () => panelHonorarios(exp, cont, pintarFichaITP),
       datos: () => panelDatos(exp, tr, cont),
       docs: () => panelDocs(exp, tr, docs, cont),
       genera: () => panelGenera(exp, tr, docs, cont),
@@ -1784,12 +1789,17 @@
       const chk = ev.target;
       const exento = chk.checked;
       const calc = exp.calculo_json || {};
-      const datos = Object.assign({}, exp.datos || {}, { itp_exento: exento });
 
       // Al retirar la exención se recupera el importe que devolvió el motor.
       const cambios = exento
-        ? { datos, itp_importe: 0, total_impuestos: exp.tasa_dgt != null ? Number(exp.tasa_dgt) : null }
-        : { datos, itp_importe: calc.itp ?? null, total_impuestos: calc.total_impuestos ?? null };
+        ? { itp_importe: 0, total_impuestos: exp.tasa_dgt != null ? Number(exp.tasa_dgt) : null }
+        : { itp_importe: calc.itp ?? null, total_impuestos: calc.total_impuestos ?? null };
+
+      /* La exención cambia el ITP, y el ITP es una de las cuatro cifras del
+         total al cliente: se recalcula con el ITP nuevo ya puesto. */
+      cambios.datos = GTHonorarios.conTotal(
+        Object.assign({}, exp, cambios),
+        Object.assign({}, exp.datos || {}, { itp_exento: exento }));
 
       chk.disabled = true;
       try {
@@ -1922,12 +1932,20 @@
         const itpFinal = exento ? 0 : r.itp;
         const totalFinal = exento ? r.tasa_dgt : r.total_impuestos;
 
-        const datosVeh = Object.assign({}, exp.datos || {}, {
-          tipo_vehiculo: tipoVeh,
-          potencia_kw: payload.potencia_kw
-        });
-
         const calculadoAt = new Date().toISOString();
+
+        /* El ITP y la tasa acaban de cambiar, y son dos de las cuatro cifras
+           del total al cliente: se recalcula con las nuevas ya puestas. Sin
+           esto, un expediente con honorarios se quedaría con el total de
+           antes de recalcular y nadie lo notaría. */
+        const datosVeh = GTHonorarios.conTotal(
+          Object.assign({}, exp, {
+            itp_importe: itpFinal, tasa_dgt: r.tasa_dgt, calculo_json: r
+          }),
+          Object.assign({}, exp.datos || {}, {
+            tipo_vehiculo: tipoVeh,
+            potencia_kw: payload.potencia_kw
+          }));
 
         await GTApi.actualizarExpediente(exp.id, {
           datos: datosVeh,
@@ -1971,6 +1989,170 @@
         btn.disabled = false;
         btn.textContent = 'Calcular ITP y tasas';
       }
+    });
+  }
+
+  /* ---------- Panel: honorarios de la gestoría y total al cliente ----------
+     Lo que se liquida a Hacienda y lo que se le COBRA al cliente son cosas
+     distintas, y esta pestaña es la segunda. El desglose enseña por qué el
+     IVA solo toca una de las tres líneas, porque es la pregunta que hace
+     cualquiera que mire una factura de gestoría por primera vez.
+
+     La cuenta no está aquí: vive en assets/js/honorarios.js, con la regla
+     del IVA en una sola multiplicación y su propio verificador. Este panel
+     solo la pinta. */
+  function panelHonorarios(exp, cont, onCambio) {
+    const r = GTHonorarios.calcular(exp);
+
+    /* Una línea del desglose. `nota` es la columna que dice por qué esa
+       línea lleva IVA o no: es el dato que se pierde en cuanto alguien
+       copia el total a otro sitio. */
+    const linea = (concepto, nota, importe, clase) => `
+      <tr class="${clase || ''}">
+        <td>${concepto}</td>
+        <td class="hon-nota">${nota}</td>
+        <td class="t-num">${importe === null ? '<span class="t-muted">—</span>' : h(eur(importe))}</td>
+      </tr>`;
+
+    const sinIva = '<span class="hon-sin-iva">sin IVA</span>';
+
+    cont.innerHTML = `
+      <div class="detail-grid">
+        <div class="card" style="align-self:start">
+          <div class="card-t">Honorarios de la gestoría</div>
+          <p class="t-muted" style="font-size:.79rem;margin:0 0 16px">
+            Lo que cobra la gestoría por tramitar el expediente. Es lo único
+            de la factura que lleva <b>IVA</b>.
+          </p>
+
+          <form id="form-honorarios">
+            <div class="form-grid">
+              <div class="field">
+                <label for="f-honorarios">Honorarios (base, €)</label>
+                <input type="number" step="0.01" min="0" name="honorarios" id="f-honorarios"
+                  value="${r.honorarios === null ? '' : h(r.honorarios)}" placeholder="100">
+              </div>
+              <div class="field">
+                <label for="f-iva">Tipo de IVA (%)</label>
+                <input type="number" step="0.01" min="0" max="100" name="honorarios_iva_tipo" id="f-iva"
+                  value="${h(r.ivaTipo)}" placeholder="${h(GTHonorarios.IVA_DEFECTO)}">
+                <small class="field-hint">El general es el
+                  <b>${h(GTHonorarios.IVA_DEFECTO)}%</b>. Se puede cambiar para un caso
+                  concreto; solo afecta a los honorarios.</small>
+              </div>
+            </div>
+            <div class="row-actions">
+              <button type="submit" class="btn btn-sm" id="btn-honorarios">Guardar honorarios</button>
+              ${r.hayHonorarios
+                ? '<button type="button" class="btn btn-ghost btn-sm" id="btn-honorarios-quitar">Quitar honorarios</button>'
+                : ''}
+            </div>
+          </form>
+
+          <div class="form-sec" style="margin-top:22px">Total a cobrar al cliente</div>
+
+          <table class="hon-tabla">
+            <tbody>
+              ${linea('ITP de la transmisión',
+                r.exentoItp && r.hayCalculoItp
+                  ? '<b>exento</b> · confirmado por el gestor'
+                  : 'impuesto · ' + sinIva,
+                r.itp)}
+              ${linea('Tasa DGT', 'suplido · ' + sinIva, r.tasaDgt)}
+              ${linea('Honorarios de la gestoría', 'base del IVA', r.honorarios)}
+              ${linea(`IVA ${h(r.ivaTipo)}% sobre honorarios`,
+                r.hayHonorarios
+                  ? `${h(eur(r.honorarios))} × ${h(r.ivaTipo)}%`
+                  : 'se calcula sobre los honorarios',
+                r.iva, 'hon-iva')}
+            </tbody>
+            <tfoot>
+              ${linea('<b>TOTAL a cobrar</b>',
+                r.faltan.length
+                  ? 'faltan ' + h(r.faltan.join(' y '))
+                  : 'ITP + tasa DGT + honorarios + IVA',
+                r.total, 'hon-total')}
+            </tfoot>
+          </table>
+
+          <div class="hon-regla">
+            ${svg('<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/>')}
+            <div><b>El IVA es solo de los honorarios.</b>
+              El <b>ITP</b> es un impuesto y la <b>tasa DGT</b> es un
+              <b>suplido</b> —la gestoría lo adelanta en nombre del cliente y se
+              lo repercute tal cual—, así que ninguno de los dos entra en la base
+              del IVA. Sumarlos ahí le cobraría al cliente un dinero que no debe.</div>
+          </div>
+
+          ${r.hayHonorarios ? `<p class="t-muted" style="font-size:.76rem;margin:14px 0 0">
+            Honorarios <b>${h(eur(r.honorarios))}</b> + IVA <b>${h(eur(r.iva))}</b>
+            = <b>${h(eur(r.honorariosConIva))}</b> con IVA.
+          </p>` : ''}
+        </div>
+
+        <div class="stack">
+          <div class="card">
+            <div class="card-t">De dónde sale cada cifra</div>
+            <dl class="dl">
+              <dt>ITP y tasa DGT</dt>
+              <dd>${r.hayCalculoItp
+                ? 'Del cálculo guardado, motor <span class="t-mono">gestotrafic-itp</span>. Aquí no se recalculan.'
+                : '<b>Sin calcular.</b> Hazlo en <b>Calculadora ITP</b>: hasta entonces el total solo suma lo que hay.'}</dd>
+              <dt>Honorarios</dt>
+              <dd>${r.hayHonorarios
+                ? 'Los ha puesto el gestor. No hay tarifa automática.'
+                : '<b>Sin fijar.</b> Los pone el gestor: no se estiman.'}</dd>
+              <dt>Factura</dt>
+              <dd>Este desglose es para el <b>cliente</b> (presupuesto o factura).
+                <b>No va al XML de OEGAM</b>: ese formato no tiene campo de importe.</dd>
+            </dl>
+          </div>
+          ${avisoRegulado()}
+        </div>
+      </div>`;
+
+    async function guardar(datosNuevos, mensaje) {
+      const btn = cont.querySelector('#btn-honorarios');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Guardando…';
+      try {
+        /* El total se recalcula SIEMPRE al escribir, y por el mismo sitio por
+           el que lo hace el cálculo del ITP: así no puede quedarse una cifra
+           antigua guardada que contradiga a las otras cuatro. */
+        const datos = GTHonorarios.conTotal(exp, datosNuevos);
+        await GTApi.actualizarExpediente(exp.id, { datos });
+        exp.datos = datos;
+        toast(mensaje, 'ok');
+        panelHonorarios(exp, cont, onCambio);
+        if (onCambio) onCambio();
+      } catch (err) {
+        toast(err.message || 'No se pudieron guardar los honorarios', 'err');
+        btn.disabled = false;
+        btn.textContent = 'Guardar honorarios';
+      }
+    }
+
+    cont.querySelector('#form-honorarios').addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const base = num(cont, 'honorarios');
+      const tipo = num(cont, 'honorarios_iva_tipo');
+
+      if (base !== null && base < 0) { toast('Los honorarios no pueden ser negativos', 'err'); return; }
+      if (tipo !== null && (tipo < 0 || tipo > 100)) { toast('El tipo de IVA va entre 0 y 100', 'err'); return; }
+
+      const datos = Object.assign({}, exp.datos || {});
+      // Sin honorarios no se guarda un 0: un cero es una tarifa, un hueco no.
+      if (base === null) delete datos.honorarios; else datos.honorarios = base;
+      datos.honorarios_iva_tipo = tipo === null ? GTHonorarios.IVA_DEFECTO : tipo;
+
+      guardar(datos, base === null ? 'Honorarios vaciados' : 'Honorarios guardados');
+    });
+
+    const btnQuitar = cont.querySelector('#btn-honorarios-quitar');
+    if (btnQuitar) btnQuitar.addEventListener('click', () => {
+      const datos = Object.assign({}, exp.datos || {});
+      delete datos.honorarios;
+      guardar(datos, 'Honorarios retirados del expediente');
     });
   }
 

@@ -181,6 +181,33 @@ depreciación no lo detecta ningún caso suelto.
 
 ---
 
+## Honorarios · el IVA solo toca los honorarios
+
+Lo que se liquida a Hacienda y lo que se le **cobra al cliente** son cuentas
+distintas. La factura suma tres conceptos que tributan distinto:
+
+| Concepto | IVA | Por qué |
+|---|---|---|
+| ITP | **NO** | es un impuesto; no se grava con otro |
+| Tasa DGT | **NO** | es un **suplido** · art. 78.Tres.3.º LIVA |
+| Honorarios | **SÍ** (21%) | es el servicio de la gestoría |
+
+**Meter la tasa DGT o el ITP en la base del IVA le cobra al cliente un dinero
+que no debe**, y es de los errores que no se ven: el total sale más alto y
+parece igual de correcto. Por eso la multiplicación por el tipo está en **un
+solo sitio** —`calcular()` en [`assets/js/honorarios.js`](assets/js/honorarios.js)—
+y no hay ninguna otra en el módulo.
+
+```bash
+node tools/verificar-honorarios.js
+```
+
+> `honorarios_total_cliente` es una cuenta de cuatro cifras que ya viven en el
+> expediente, así que **puede quedarse atrás**. Todo lo que mueva alguna de las
+> cuatro —guardar honorarios, calcular el ITP, marcar la exención— tiene que
+> pasar por `GTHonorarios.conTotal()`; la pantalla pinta siempre desde
+> `calcular()`, nunca desde el valor guardado.
+
 ---
 
 ## Exportación a OEGAM · dos catálogos pendientes

@@ -168,6 +168,56 @@ queda en 0 y el total se reduce a la tasa DGT (mismo caso: 395,70 € → 55,70 
 `calculo_json` conserva íntegro el resultado del motor, así que la exención es
 auditable y reversible. Detalle en [`TRAMITES.md`](TRAMITES.md).
 
+### 5 bis · Honorarios y total al cliente
+
+Lo que se liquida a Hacienda y lo que se le **cobra al cliente** son cuentas
+distintas, y por eso van en pestañas distintas. La de *Honorarios y total*
+añade lo único que falta —lo que cobra la gestoría— y arma la factura:
+
+| Concepto | IVA | De dónde sale |
+|---|---|---|
+| ITP de la transmisión | **NO** · es un impuesto | del cálculo guardado |
+| Tasa DGT | **NO** · es un **suplido** | del cálculo guardado |
+| Honorarios de la gestoría | **sí, es la base** | lo pone el gestor |
+| IVA (21% por defecto, editable) | — | `honorarios × tipo` |
+
+> ⛔ **El IVA se aplica SOLO a los honorarios.** No es una preferencia de
+> presentación: un suplido no forma parte de la base imponible del IVA
+> (art. 78.Tres.3.º LIVA) y un impuesto no se grava con otro impuesto. Meter la
+> tasa DGT o el ITP en esa base le cobra al cliente un dinero que no debe, y es
+> un error que **no se ve**: el total sale más alto y parece igual de correcto.
+>
+> Por eso la multiplicación por el tipo está en **un solo sitio**
+> ([`assets/js/honorarios.js`](../assets/js/honorarios.js)) y tiene su propio
+> verificador, que la comprueba de cinco maneras — incluida la más directa: sin
+> honorarios **no hay IVA ninguno**, por mucho ITP y mucha tasa que haya.
+
+Sobre el mismo caso de arriba, con 100 € de honorarios:
+
+> ITP 340,00 € + tasa DGT 55,70 € + honorarios 100,00 € + IVA 21,00 €
+> = **total a cobrar 516,70 €**.
+
+**Anti-invención.** Los honorarios los pone el gestor: no hay tarifa automática
+ni estimación. El ITP y la tasa se leen del cálculo guardado y **no se
+recalculan aquí**. Si falta alguna de las dos cosas, el total suma solo lo que
+hay y el desglose dice qué falta, en vez de cerrar un presupuesto con una cifra
+inventada.
+
+Se guarda en `datos` (sin migración): `honorarios`, `honorarios_iva_tipo` y
+`honorarios_total_cliente`. Ese último es una cuenta de cifras que ya están en
+el expediente, así que **se recalcula en los tres caminos que las mueven**
+—guardar honorarios, calcular el ITP y marcar la exención—, todos por la misma
+función. Un total antiguo contradiciendo a las otras cuatro cifras es
+exactamente lo que no puede quedar guardado.
+
+Este desglose es para el **cliente** (presupuesto o factura). **No va al XML de
+OEGAM**: ese formato no tiene campo de importe, igual que pasa con el ITP (ver
+[`OEGAM.md`](OEGAM.md)).
+
+```bash
+node tools/verificar-honorarios.js
+```
+
 ### 6 · Documentación
 
 Checklist por trámite con 5 documentos obligatorios y 2 opcionales (ITV, otros).

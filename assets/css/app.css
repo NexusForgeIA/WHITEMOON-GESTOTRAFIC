@@ -822,6 +822,47 @@ tbody tr.clickable:hover { background: rgba(124, 77, 255, .07); }
 .badge-exento { background: rgba(0, 212, 170, .15); color: var(--g); }
 .badge-admin  { background: rgba(124, 77, 255, .17); color: var(--p2); }
 .badge-gestor { background: rgba(92, 170, 255, .15); color: #7cb8ff; }
+/* ---------------- Honorarios · desglose al cliente ----------------
+   La columna del medio no es decorativa: dice POR QUÉ cada línea lleva IVA
+   o no, que es lo primero que se pierde en cuanto alguien copia el total. */
+.hon-tabla { width: 100%; border-collapse: collapse; }
+.hon-tabla td {
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--border-2);
+  font-size: .84rem;
+  vertical-align: baseline;
+}
+.hon-tabla td.t-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
+.hon-nota { color: var(--muted); font-size: .73rem; }
+.hon-sin-iva {
+  display: inline-block;
+  background: rgba(124, 77, 255, .16);
+  color: var(--p2);
+  border-radius: 4px; padding: 1px 6px;
+  font-size: .67rem; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.hon-tabla .hon-iva td { color: var(--g); }
+.hon-tabla .hon-iva td.hon-nota { color: rgba(0, 212, 170, .72); }
+.hon-tabla tfoot .hon-total td {
+  border-bottom: none;
+  border-top: 2px solid rgba(0, 212, 170, .42);
+  padding-top: 13px;
+  font-size: .95rem;
+}
+.hon-tabla tfoot .hon-total td.t-num { color: var(--g); font-size: 1.14rem; font-weight: 800; }
+.hon-tabla tfoot .hon-total td.hon-nota { font-size: .72rem; }
+
+.hon-regla {
+  display: flex; align-items: flex-start; gap: 11px;
+  margin-top: 18px; padding: 13px 15px;
+  border: 1px solid rgba(124, 77, 255, .3);
+  background: rgba(124, 77, 255, .08);
+  border-radius: var(--radius-sm);
+  font-size: .78rem; line-height: 1.62; color: var(--text);
+}
+.hon-regla svg { width: 18px; height: 18px; flex: none; margin-top: 1px; color: var(--p2); }
+
 /* ---------------- El ITP calculado, fijo en la ficha ---------------- */
 /* Va fuera de las pestañas: un expediente en tramitación tiene que enseñar
    lo que se liquida sin que nadie entre en la calculadora. */
