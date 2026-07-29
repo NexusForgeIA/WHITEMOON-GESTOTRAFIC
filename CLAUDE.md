@@ -215,10 +215,14 @@ lo correcto, no un fallo:
 > eso a Gest-IA se le pide la palabra («hombre»/«mujer») y la traducción vive
 > solo en `gestia.js`.
 
-> Tocar el perfil `dni` de `gestia-extraer` obliga a mirar el **presupuesto de
-> uniones**: la API admite 16 `anyOf` por esquema y pasarse devuelve 400,
-> tumbando TODA lectura de DNI sin previo aviso. Van 11; el verificador lo
-> cuenta. Y hay que **desplegar** la función para que el cambio surta efecto.
+> Tocar el perfil `dni` de `gestia-extraer` obliga a mirar **dos topes**, no uno:
+> las 16 uniones `anyOf` por esquema **y el tamaño de la gramática compilada**,
+> que se agota mucho antes — 14 campos compilan, 15 devuelven 400. Vigilar solo
+> el primero es lo que dejó el DNI roto en producción con 17 campos y 11 uniones,
+> devolviendo `200` porque el fallo se captura por documento. Por eso el DNI se
+> lee **en dos bloques, uno por cara**, y `MAX_CAMPOS_ESQUEMA` hace fallar el
+> arranque de la función si alguien los junta. El verificador cuenta campos por
+> bloque. Y hay que **desplegar** la función para que el cambio surta efecto.
 
 Y hay un tercer punto, que no bloquea: las **constantes copiadas verbatim**
 de la plantilla (`TIPO_ID_VEHICULO` = 40, `MODO_ADJUDICACION` = 1,

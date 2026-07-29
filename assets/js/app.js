@@ -2925,7 +2925,10 @@
         const cara = k.slice(k.indexOf('|') + 1);
         const archivo = await GTApi.subirArchivo(exp.id, tipo, archivos[k], cara);
         await GTApi.registrarDocumento(exp.id, tipo, archivo);
-        subidos.push({ tipo: tipo, storage_path: archivo.path });
+        /* La cara viaja con el archivo: el DNI se lee en dos pasadas (anverso y
+           reverso) y así cada una recibe solo su cara en vez de las dos. Sin
+           este dato la lectura sale igual, solo cuesta el doble de imágenes. */
+        subidos.push({ tipo: tipo, storage_path: archivo.path, cara: cara });
       }
 
       paso(2);

@@ -70,21 +70,39 @@ falta columna nueva: la cara viaja en el nombre del objeto del bucket
 objeto sin marca de cara —los de antes de esto— se lee como el documento
 entero, que es lo que era.
 
-`gestia-extraer` **agrupa por `tipo` y lee el grupo en una sola llamada**, para
-que el domicilio del reverso caiga en el mismo registro que el número del
-anverso. Agrupa por tipo y solo por tipo: cada documento del checklist sigue
-siendo su propia llamada, así que **el DNI del comprador nunca ve el del
-vendedor** y no hay manera de que un dato de uno acabe en el otro.
+`gestia-extraer` **agrupa por `tipo` y devuelve un solo resultado por
+documento**, para que el domicilio del reverso caiga en el mismo registro que el
+número del anverso. Agrupa por tipo y solo por tipo: cada documento del
+checklist sigue siendo su propia lectura, así que **el DNI del comprador nunca
+ve el del vendedor** y no hay manera de que un dato de uno acabe en el otro.
 
 El permiso de circulación y la ficha técnica admiten lo mismo (dos caras, dos
 páginas). Solo el DNI declara sus caras en el perfil de extracción, porque es
 el único donde un campo concreto vive en una cara concreta.
 
+#### Por dentro, el DNI son dos llamadas
+
+El perfil `dni` no monta un esquema con sus 17 campos: monta **uno por cara**
+—7 del anverso y 10 del reverso— y funde las dos respuestas antes de devolver
+nada. Es obligado, no una preferencia: el esquema se compila a una gramática con
+un tamaño máximo y **14 campos compilan, 15 ya no** (ver *Los dos topes* abajo).
+
+Que la partición siga a las caras del documento, y no a un corte arbitrario por
+la mitad, sale gratis y aporta: la llamada del anverso **no ve el reverso**, así
+que no puede confundir la provincia de nacimiento con la del domicilio — que es
+la confusión clásica de esta lectura, y la que decide con qué tipo autonómico se
+liquida el ITP.
+
+El cliente manda además la `cara` de cada archivo, así que cada llamada recibe
+solo la suya y el coste en imágenes no sube. Si no la manda —un cliente antiguo,
+o un único archivo con las dos caras— cada bloque ve todos los archivos y la
+lectura sale igual.
+
 #### La cara que falta se dice, no se rellena
 
-El modelo devuelve en `caras_vistas` qué caras está viendo **de verdad**. De ahí
-sale `caras_faltan`, y de ahí el aviso del banner: *«DNI / NIE del comprador ·
-falta el reverso»*.
+Cada bloque responde en `cara_vista` si está viendo su cara **de verdad**. De ahí
+se reconstruye `caras_vistas`, de ahí sale `caras_faltan`, y de ahí el aviso del
+banner: *«DNI / NIE del comprador · falta el reverso»*.
 
 Se pregunta explícitamente en vez de deducirlo de que el domicilio venga vacío
 porque **no son lo mismo**: un domicilio borroso se arregla con una foto mejor y
@@ -289,6 +307,35 @@ Se manejan dos cosas que la API puede devolver:
 
 Las imágenes van como bloques `image` y los PDF como bloques `document`, ambos en
 base64.
+
+### Los dos topes del esquema
+
+Los structured outputs tienen **dos límites distintos**, y los dos se manifiestan
+igual: un `400` que tumba de golpe **toda** lectura de ese tipo de documento, en
+producción, sin aviso previo y sin que ningún test lo note.
+
+| Tope | Cuánto | Qué lo gasta |
+|---|---|---|
+| Uniones `anyOf` | 16 por esquema | Cada campo *nullable*. Los `simple: true` no gastan. |
+| Tamaño de la gramática compilada | **14 campos** con la forma `{valor, confianza, nota}` | Todos los campos, gasten unión o no. |
+
+**El que muerde primero es el segundo**, y por bastante. El perfil `dni` llegó a
+17 campos gastando solo 11 uniones: pasaba de sobra el presupuesto de `anyOf`
+—que era lo único que se vigilaba— y aun así devolvía
+`compiled grammar is too large`. Estuvo así desde que se añadieron los campos de
+OEGAM: la función seguía respondiendo `200` porque cada documento se captura por
+separado, así que en los logs no había ningún error, solo DNIs que no rellenaban
+nada.
+
+Los dos números están medidos contra la API, no deducidos: con 14 campos compila
+y con 15 no. Por eso ahora:
+
+- `MAX_CAMPOS_ESQUEMA = 14` en `gestia-extraer`, y un bloque que se pase **hace
+  fallar el arranque de la función**, no una lectura suelta.
+- `tools/verificar-oegam.js` cuenta **campos por bloque**, no solo uniones.
+
+Si un perfil necesita más campos, la salida no es apretar el esquema: es
+**partirlo en otro bloque**, como el DNI.
 
 > El modelo se cambia en una constante (`MODELO`) al principio de la función.
 > Con un volumen alto y documentos limpios, un modelo menor puede salir a
