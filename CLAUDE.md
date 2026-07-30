@@ -5,7 +5,7 @@ Pages, con Supabase detrás (proyecto `mlaqtniujnvfxcvcourm`).
 
 Documentación funcional en [`docs/`](docs/): [FASE-1](docs/FASE-1.md) ·
 [TRAMITES](docs/TRAMITES.md) · [USUARIOS](docs/USUARIOS.md) ·
-[GEST-IA](docs/GEST-IA.md) · [OEGAM](docs/OEGAM.md).
+[GEST-IA](docs/GEST-IA.md) · [OEGAM](docs/OEGAM.md) · [PANEL](docs/PANEL.md).
 
 ---
 
@@ -276,6 +276,62 @@ node tools/verificar-honorarios.js
 > cuatro —guardar honorarios, calcular el ITP, marcar la exención— tiene que
 > pasar por `GTHonorarios.conTotal()`; la pantalla pinta siempre desde
 > `calcular()`, nunca desde el valor guardado.
+
+---
+
+## Panel de gerencia · lo que no se sabe, se dice
+
+El panel ([`assets/js/panel.js`](assets/js/panel.js), doc en
+[`docs/PANEL.md`](docs/PANEL.md)) **cuenta**; `vistaDashboard()` en `app.js`
+solo **pinta** lo que le devuelve. Por eso se puede ejecutar en node:
+
+```bash
+node tools/verificar-panel.js
+```
+
+⛔ **Una métrica sin dato NO devuelve 0.** Devuelve `valor: null`,
+`sinDatos: true` y un `motivo`, y la vista está obligada a enseñar el motivo.
+Un «0 días de media en documentación» se lee como un equipo impecable cuando lo
+que pasa es que nadie ha medido nada, y nadie audita un número creíble. En el
+CSV esas celdas salen **vacías**: un cero de relleno se convierte en un total
+falso en cuanto alguien arrastra una fórmula.
+
+### Los tiempos salen del historial, y de nada más
+
+`gestotrafic_estado_historial` guarda cada cambio de estado con su fecha. Sin
+esa tabla no hay tiempo medio, ni tiempos por estado, ni cuellos de botella, y
+**no se deducen**: `updated_at` cambia al guardar cualquier cosa —honorarios,
+ITP, una nota— y daría tiempos cortos, creíbles y que no ha medido nadie.
+
+Lo escribe un **trigger**, no la aplicación: un registro que hay que acordarse
+de escribir en cada sitio que cambia el estado se queda a medias en cuanto
+aparece el sitio nuevo, y un historial con huecos miente peor que uno vacío.
+Desde el navegador es de **solo lectura** (la tabla no tiene `insert` para
+nadie; el trigger es `SECURITY DEFINER`): es la prueba de cuánto se tardó, y
+una prueba editable no lo es.
+
+> ⚠️ **No se rellenó hacia atrás, y no hay que rellenarlo.** `estado_anterior IS
+> NULL` marca el alta; sin esa fila no se sabe cuándo entró el expediente, así
+> que **queda fuera de las medias** en vez de medirse desde la mitad. Los
+> expedientes anteriores a la tabla dirán «sin datos» hasta que se sustituyan
+> por otros con recorrido completo. Inventar un alta desde `created_at` daría un
+> panel bonito el primer día y tiempos falsos para siempre.
+
+### Tres trampas que ya se cazaron
+
+- **La facturación son los honorarios y nada más.** Ni IVA (se ingresa en
+  Hacienda), ni ITP (es un impuesto), ni tasa DGT (es un suplido). Cuál es el
+  honorario lo decide `GTHonorarios`, no el panel.
+- **La tabla por agente tiene que sumar el indicador de arriba.** Un expediente
+  sin `gestor_id` o de un usuario que ya no está en la lista va a una fila
+  «Sin asignar»; si desapareciera, la columna dejaría de cuadrar y parecería que
+  el KPI miente.
+- **El % no existe cuando el periodo anterior valía 0.** Se enseña el absoluto:
+  un «+100 %» al pasar de 0 a 7 dice algo distinto de lo que ocurrió.
+
+Las alertas **no reimplementan ninguna regla**: se las preguntan a
+`GTServicio`, `GTValidaciones` y al catálogo de trámites, para que el panel no
+sea una segunda opinión que se desvía.
 
 ---
 

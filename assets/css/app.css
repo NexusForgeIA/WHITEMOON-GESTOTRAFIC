@@ -822,6 +822,10 @@ tbody tr.clickable:hover { background: rgba(124, 77, 255, .07); }
 .badge-exento { background: rgba(0, 212, 170, .15); color: var(--g); }
 .badge-admin  { background: rgba(124, 77, 255, .17); color: var(--p2); }
 .badge-gestor { background: rgba(92, 170, 255, .15); color: #7cb8ff; }
+/* Gris y sin color de estado: marca una fila que existe pero no es de nadie
+   —gestor desactivado o expediente sin asignar—. No es una alerta; es que la
+   tabla por agente tiene que sumar el total y ahí va lo que no encaja. */
+.badge-inactivo { background: rgba(255, 255, 255, .07); color: var(--muted); }
 /* ---------------- Validaciones previas · lo que no cuadra ----------------
    Ámbar, no rojo: no bloquean nada. Plegable porque en un expediente a
    medio rellenar pueden ser varios y no deben tapar la ficha. */
@@ -1236,3 +1240,286 @@ tbody tr.clickable:hover { background: rgba(124, 77, 255, .07); }
 .gt-detalle > summary:hover { color: var(--text); }
 .gt-detalle b { color: var(--text); }
 .gt-detalle .t-mono { color: var(--p2); }
+
+/* ============================================================
+   PANEL DE GERENCIA
+   ------------------------------------------------------------
+   Un panel se mira de un vistazo y se decide con él, así que la
+   jerarquía la marca el TAMAÑO del número, no el color: los cuatro
+   indicadores llevan el mismo tratamiento y lo que destaca es el
+   dato, no la tarjeta.
+
+   El color solo significa dos cosas, y siempre las mismas:
+     · verde/rojo · la variación va bien o va mal
+     · ámbar      · algo pide atención (cuello de botella, aviso)
+   Nada es de color por decoración; si lo fuera, el ámbar del cuello
+   de botella dejaría de leerse como una advertencia.
+   ============================================================ */
+
+/* ---- Cabecera y filtros ---- */
+.pnl-acciones { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.pnl-filtros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+}
+.pnl-filtros label { display: flex; flex-direction: column; gap: 5px; }
+.pnl-filtros label > span {
+  font-size: .64rem; text-transform: uppercase; letter-spacing: .13em;
+  color: var(--muted); font-weight: 700;
+}
+.pnl-filtros select {
+  min-width: 178px;
+  padding: 8px 11px;
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  font-size: .82rem;
+}
+.pnl-filtros select:focus { outline: 2px solid var(--p); outline-offset: 1px; }
+.pnl-limpiar {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  padding: 8px 13px;
+  font-size: .78rem;
+  cursor: pointer;
+}
+.pnl-limpiar:hover { color: var(--text); border-color: var(--border); }
+
+/* ---- Aviso sobre el historial ---- */
+.pnl-avisoh {
+  padding: 15px 18px;
+  margin-bottom: 20px;
+  background: rgba(255, 180, 92, .08);
+  border: 1px solid rgba(255, 180, 92, .3);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  font-size: .81rem;
+  color: var(--muted);
+}
+.pnl-avisoh b { color: var(--text); }
+.pnl-avisoh p { margin: 6px 0 0; }
+.pnl-avisoh code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .95em; color: var(--warn);
+}
+.pnl-avisoh-leve { background: rgba(255, 255, 255, .03); border-color: var(--border-2); }
+
+/* ---- Tarjetas de indicador ---- */
+.pnl-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(232px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.pnl-kpi {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 20px 0;
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.pnl-kpi-lbl {
+  font-size: .66rem; text-transform: uppercase; letter-spacing: .13em;
+  color: var(--muted); font-weight: 700;
+}
+.pnl-kpi-num {
+  font-size: 2.1rem; font-weight: 800; letter-spacing: -.035em;
+  line-height: 1; margin-top: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.pnl-kpi-num small { font-size: .9rem; font-weight: 600; color: var(--muted); letter-spacing: 0; }
+.pnl-kpi-pie { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.pnl-kpi-vs { font-size: .68rem; color: var(--muted); }
+.pnl-kpi-nota {
+  font-size: .7rem; color: var(--muted);
+  padding: 9px 0 14px;
+  border-top: 1px solid var(--border-2);
+  margin-top: 12px;
+}
+.pnl-kpi-vacia { padding-bottom: 18px; }
+
+/* La mini-tendencia se pega al borde inferior: es fondo del dato, no un
+   gráfico que se lea por su cuenta. Sin ejes ni escala, porque no los tiene. */
+.pnl-spark {
+  display: block;
+  width: calc(100% + 40px);
+  height: 34px;
+  margin: 12px -20px 0;
+}
+
+/* ---- Variación ---- */
+.pnl-delta {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px;
+  border-radius: 99px;
+  font-size: .72rem; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pnl-delta i { font-style: normal; font-size: .6rem; }
+.pnl-delta-pct { font-weight: 600; opacity: .78; }
+.pnl-delta-bien  { background: rgba(0, 212, 170, .13); color: var(--g); }
+.pnl-delta-mal   { background: rgba(255, 92, 122, .13); color: var(--danger); }
+.pnl-delta-igual { background: rgba(255, 255, 255, .05); color: var(--muted); }
+.pnl-delta-na    { background: rgba(255, 255, 255, .04); color: var(--muted); font-weight: 600; }
+
+/* ---- «Sin datos suficientes» ----
+   Deliberadamente NO parece un error ni una tarjeta rota: es una respuesta
+   legítima. Pero tampoco parece un número, que es lo que importa. */
+.pnl-nodata {
+  padding: 13px 14px;
+  margin-top: 12px;
+  background: rgba(255, 255, 255, .028);
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius-sm);
+}
+.pnl-nodata b { display: block; font-size: .8rem; color: var(--muted); font-weight: 700; }
+.pnl-nodata p { margin: 5px 0 0; font-size: .72rem; color: var(--muted); opacity: .82; line-height: 1.5; }
+
+/* ---- Embudo, tipos y tiempos ---- */
+.pnl-duo {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.pnl-duo + .card { margin-bottom: 14px; }
+
+.pnl-sub { margin: -8px 0 16px; font-size: .76rem; color: var(--muted); line-height: 1.55; }
+.pnl-pie { margin: 14px 0 0; font-size: .72rem; color: var(--muted); opacity: .85; }
+
+.pnl-embudo, .pnl-tiempos { display: flex; flex-direction: column; gap: 10px; }
+.pnl-emb-row {
+  display: grid;
+  grid-template-columns: 150px 1fr 34px 46px;
+  align-items: center; gap: 12px; font-size: .8rem;
+}
+.pnl-t-row { display: grid; grid-template-columns: 150px 1fr 56px 116px; align-items: center; gap: 12px; font-size: .8rem; }
+.pnl-emb-lbl { color: var(--muted); }
+.pnl-emb-track { height: 9px; background: rgba(255, 255, 255, .055); border-radius: 99px; overflow: hidden; }
+.pnl-emb-fill { height: 100%; border-radius: 99px; transition: width .45s cubic-bezier(.4, 0, .2, 1); }
+.pnl-emb-n, .pnl-t-dias { text-align: right; font-variant-numeric: tabular-nums; }
+.pnl-emb-pct { text-align: right; font-size: .72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pnl-t-cuello .pnl-emb-lbl, .pnl-t-cuello .pnl-t-dias { color: var(--warn); font-weight: 700; }
+.pnl-chip-cuello {
+  justify-self: start;
+  padding: 2px 9px;
+  border-radius: 99px;
+  background: rgba(255, 180, 92, .14);
+  color: var(--warn);
+  font-size: .64rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .08em;
+  white-space: nowrap;
+}
+
+/* ---- Tabla de agentes ---- */
+.pnl-tabla th.num, .pnl-tabla td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.pnl-tabla td.num { white-space: nowrap; }
+
+/* ---- Alertas ---- */
+.pnl-badge-n {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 99px;
+  background: rgba(124, 77, 255, .2);
+  color: var(--p2);
+  font-size: .7rem; font-weight: 800;
+  text-align: center;
+  letter-spacing: 0;
+}
+.pnl-alerta {
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-2);
+  border-left-width: 3px;
+  background: rgba(255, 255, 255, .022);
+}
+.pnl-alerta + .pnl-alerta { margin-top: 12px; }
+.pnl-alerta-alto  { border-left-color: var(--danger); }
+.pnl-alerta-medio { border-left-color: var(--warn); }
+.pnl-alerta-cab { display: flex; align-items: center; gap: 9px; }
+.pnl-alerta-cab b { font-size: .86rem; }
+.pnl-alerta-alto .pnl-badge-n  { background: rgba(255, 92, 122, .16); color: var(--danger); }
+.pnl-alerta-medio .pnl-badge-n { background: rgba(255, 180, 92, .16); color: var(--warn); }
+.pnl-alerta-pie { margin: 6px 0 0; font-size: .73rem; color: var(--muted); line-height: 1.5; }
+.pnl-alerta-lista { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.pnl-alerta-lista li {
+  display: grid;
+  grid-template-columns: 118px 1fr auto;
+  gap: 12px;
+  align-items: baseline;
+  padding-top: 7px;
+  border-top: 1px solid var(--border-2);
+  font-size: .79rem;
+}
+.pnl-alerta-lista li > span { color: var(--muted); }
+.pnl-alerta-lista li > em { font-style: normal; font-size: .72rem; color: var(--muted); opacity: .7; white-space: nowrap; }
+.pnl-alerta-ref {
+  justify-self: start;
+  background: none; border: none; padding: 0;
+  color: var(--p2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .78rem; font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.pnl-alerta-ref:hover { text-decoration: underline; }
+
+.pnl-todobien {
+  padding: 16px 18px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 212, 170, .06);
+  border: 1px solid rgba(0, 212, 170, .22);
+}
+.pnl-todobien b { color: var(--g); font-size: .86rem; }
+.pnl-todobien p { margin: 6px 0 0; font-size: .78rem; color: var(--muted); }
+
+/* ---- Móvil ---- */
+@media (max-width: 720px) {
+  .pnl-filtros select { min-width: 0; width: 100%; }
+  .pnl-filtros label { flex: 1 1 160px; }
+  .pnl-limpiar { margin-left: 0; width: 100%; }
+  .pnl-emb-row { grid-template-columns: 104px 1fr 30px 42px; gap: 9px; font-size: .75rem; }
+  .pnl-t-row { grid-template-columns: 104px 1fr 52px; gap: 9px; font-size: .75rem; }
+  .pnl-chip-cuello { grid-column: 1 / -1; justify-self: start; margin-top: 2px; }
+  .pnl-alerta-lista li { grid-template-columns: 1fr; gap: 3px; }
+  .pnl-alerta-lista li > em { opacity: .55; }
+}
+
+/* ---- Impresión · el «PDF» del panel ----
+   Se imprime lo que se está viendo, con los mismos números. Fuera el menú,
+   los botones y los fondos oscuros, que en papel se comen el tóner y dejan
+   el texto ilegible. */
+@media print {
+  @page { margin: 14mm; }
+  html, body { background: #fff; color: #111; }
+  body::before, .demo-seal, .sidebar, .pnl-acciones, .pnl-limpiar, .regul-note { display: none !important; }
+  .main { padding: 0 !important; }
+  .card, .pnl-kpi, .pnl-filtros {
+    background: #fff !important;
+    border: 1px solid #ccc !important;
+    box-shadow: none !important;
+    break-inside: avoid;
+  }
+  .pnl-kpi-num, .card-t, .pnl-alerta-cab b, .pnl-nodata b, h1 { color: #111 !important; }
+  .pnl-sub, .pnl-pie, .pnl-emb-lbl, .pnl-kpi-lbl, .pnl-kpi-nota, .pnl-alerta-pie { color: #555 !important; }
+  .pnl-emb-track { background: #eee !important; }
+  .pnl-alerta { break-inside: avoid; }
+  .table-wrap { overflow: visible; border-color: #ccc !important; }
+  table { min-width: 0; }
+}

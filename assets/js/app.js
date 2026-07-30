@@ -27,6 +27,16 @@
     return isNaN(+d) ? '—' : d.toLocaleDateString('es-ES');
   };
 
+  /* Número en formato español (coma decimal), sin decimales de más. El panel
+     lo usa para días y porcentajes; `null` es «no se sabe» y NO se convierte
+     en 0 aquí: quien lo pinta ya ha decidido antes que hay algo que pintar.
+
+     Se llama `cifra` y no `num` porque `num(root, name)` ya existe más abajo y
+     es otra cosa: lee un campo del formulario. */
+  const cifra = (v) => (v === null || v === undefined || isNaN(Number(v)))
+    ? '—'
+    : new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 }).format(Number(v));
+
   const estadoInfo = (id) => window.GT_ESTADOS.find(e => e.id === id) || { label: id, color: '#8888a0' };
 
   const nombreCliente = (c) => {
@@ -499,100 +509,410 @@
   }
 
   /* ============================================================
-     VISTA · DASHBOARD
+     VISTA · PANEL DE GERENCIA
+     ------------------------------------------------------------
+     Aquí no se calcula nada: todo sale de `GTPanel.calcular()`, que vive
+     aparte para poder ejecutarse en node y verificarse contra la base
+     (`node tools/verificar-panel.js`). Esta función solo pinta el modelo.
+
+     ⛔ Regla de pintado · una métrica con `sinDatos` NO se pinta como
+     número. El modelo trae `valor: null` en esos casos, y un `null`
+     formateado acaba siendo un «0 días» que se lee como un equipo
+     rapidísimo cuando lo que pasa es que nadie ha medido nada. Para eso
+     está `bloqueSinDatos()`, que enseña el motivo en su lugar.
      ============================================================ */
+
+  /* Los filtros viven aquí y no en el hash: sobreviven a volver al panel
+     desde un expediente, que es el recorrido normal, y no ensucian la URL
+     de una demo que se enseña en pantalla. */
+  const gerenciaFiltros = { periodo: 'mes', gestor: '', tipo: '' };
+  let gerenciaDatos = null;
+  let gerenciaModelo = null;
+
+  /** Número con el formato que declara la métrica. Nunca recibe `null`. */
+  function valorKpi(k) {
+    if (k.formato === 'euros') return eur(k.valor);
+    if (k.formato === 'pct') return cifra(k.valor) + ' %';
+    if (k.formato === 'dias') return cifra(k.valor) + ' <small>días</small>';
+    return cifra(k.valor);
+  }
+
+  /** Chip de variación. Sin comparación posible, se dice — no se pinta 0%. */
+  function chipDelta(k) {
+    const d = k.delta;
+    if (!d) return `<span class="pnl-delta pnl-delta-na">sin comparación</span>`;
+    if (d.dir === 'igual') return `<span class="pnl-delta pnl-delta-igual">sin cambio</span>`;
+    const cls = d.bueno ? 'pnl-delta-bien' : 'pnl-delta-mal';
+    const flecha = d.dir === 'sube' ? '▲' : '▼';
+    const abs = k.formato === 'euros' ? eur(Math.abs(d.abs))
+      : (k.formato === 'pct' ? cifra(Math.abs(d.abs)) + ' pp'
+        : cifra(Math.abs(d.abs)) + (k.formato === 'dias' ? ' d' : ''));
+    /* Sin porcentaje cuando el periodo anterior valía 0: un «+100%» al pasar
+       de 0 a 7 dice algo distinto de lo que ocurrió. */
+    const pct = d.pct === null ? '' : ` <span class="pnl-delta-pct">${d.pct > 0 ? '+' : ''}${cifra(d.pct)}%</span>`;
+    return `<span class="pnl-delta ${cls}"><i aria-hidden="true">${flecha}</i> ${abs}${pct}</span>`;
+  }
+
+  /**
+   * Mini-tendencia. Es un apoyo visual, no una fuente: si hay menos de dos
+   * puntos no se dibuja una raya plana que insinúe estabilidad.
+   */
+  function sparkline(serie, color) {
+    if (!serie || serie.length < 2) return '';
+    const max = Math.max(...serie, 0);
+    const min = Math.min(...serie, 0);
+    const rango = (max - min) || 1;
+    const W = 100, H = 28;
+    const px = (i) => (i / (serie.length - 1)) * W;
+    const py = (v) => H - ((v - min) / rango) * (H - 3) - 1.5;
+    const linea = serie.map((v, i) => `${px(i).toFixed(2)},${py(v).toFixed(2)}`).join(' ');
+    const area = `0,${H} ` + linea + ` ${W},${H}`;
+    return `<svg class="pnl-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+      <polygon points="${area}" fill="${color}" opacity=".13"/>
+      <polyline points="${linea}" fill="none" stroke="${color}" stroke-width="1.6"
+        vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>
+    </svg>`;
+  }
+
+  /** Lo que se pinta en lugar de un número que no existe. */
+  const bloqueSinDatos = (motivo) => `<div class="pnl-nodata">
+    <b>Sin datos suficientes</b>
+    <p>${h(motivo)}</p>
+  </div>`;
+
+  function tarjetaKpi(k, color) {
+    return `<div class="pnl-kpi${k.sinDatos ? ' pnl-kpi-vacia' : ''}">
+      <div class="pnl-kpi-lbl">${h(k.etiqueta)}</div>
+      ${k.sinDatos
+        ? bloqueSinDatos(k.motivo)
+        : `<div class="pnl-kpi-num">${valorKpi(k)}</div>
+           <div class="pnl-kpi-pie">${chipDelta(k)}${k.delta ? `<span class="pnl-kpi-vs">vs ${h(gerenciaModelo.rango.previo.label)}</span>` : ''}</div>
+           ${sparkline(k.serie, color)}`}
+      ${k.nota && !k.sinDatos ? `<div class="pnl-kpi-nota">${h(k.nota)}</div>` : ''}
+    </div>`;
+  }
+
+  /* Los datos se releen cada vez que se entra al panel: volver desde un
+     expediente que se acaba de mover tiene que enseñar el movimiento. Lo que
+     sobrevive es el FILTRO, que es lo que molesta volver a poner. */
   async function vistaDashboard() {
     loading('Cargando indicadores…');
-    const [k, expedientes] = await Promise.all([GTApi.kpis(), GTApi.listarExpedientes()]);
-    const recientes = expedientes.slice(0, 6);
-    const maxEstado = Math.max(1, ...Object.values(k.porEstado));
+    gerenciaDatos = await GTApi.datosPanel();
+    pintarGerencia();
+  }
+
+  function pintarGerencia() {
+    const m = gerenciaModelo = window.GTPanel.calcular({
+      expedientes: gerenciaDatos.expedientes,
+      historial: gerenciaDatos.historial,
+      documentos: gerenciaDatos.documentos,
+      usuarios: gerenciaDatos.usuarios,
+      periodo: gerenciaFiltros.periodo,
+      filtros: { gestor: gerenciaFiltros.gestor, tipo: gerenciaFiltros.tipo },
+      esAdmin: GTAuth.isAdmin()
+    });
+
+    const A = m.alertas;
+    const gruposAlerta = [
+      { id: 'servicio', titulo: 'Bloqueados por cambio de servicio', lista: A.servicio, nivel: 'alto',
+        pie: 'La ficha técnica lleva un código de clasificación distinto del que exige el servicio de destino. Hay que pasar por la ITV ANTES de presentar.' },
+      { id: 'dni', titulo: 'DNI caducados', lista: A.dniCaducado, nivel: 'alto',
+        pie: 'Un documento de identidad caducado se devuelve en ventanilla.' },
+      { id: 'docs', titulo: `Documentación pendiente · más de ${window.GTPanel.DIAS_DOC_PENDIENTE} días`, lista: A.docPendiente, nivel: 'medio',
+        pie: 'Falta algún documento que el trámite declara obligatorio.' },
+      { id: 'validacion', titulo: 'Datos que no cuadran', lista: A.validacion, nivel: 'medio',
+        pie: 'Son avisos: no corrigen nada y no dicen cuál sería el valor bueno. Hay que mirarlo con el documento delante.' }
+    ].filter(g => g.lista.length);
 
     view.innerHTML = `
       ${cabecera()}
       <div class="page-head">
         <div>
-          <h1>Hola, ${h(session.nombre.split(' ')[0])} 👋</h1>
-          <p>${ambito()}</p>
+          <h1>Panel de gerencia</h1>
+          <p>${ambito()} · ${h(m.rango.label)}</p>
         </div>
-        <button class="btn" data-nuevo-exp>+ Nuevo expediente</button>
-      </div>
-
-      <div class="kpi-grid">
-        <div class="kpi">
-          <div class="kpi-lbl">Expedientes activos</div>
-          <div class="kpi-num">${k.totalExpedientes}</div>
-          <div class="kpi-sub">${k.porEstado.completado} completados</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-lbl">Expedientes del mes</div>
-          <div class="kpi-num">${k.expedientesMes}</div>
-          <div class="kpi-sub">${new Date().toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-lbl">Clientes totales</div>
-          <div class="kpi-num">${k.totalClientes}</div>
-          <div class="kpi-sub">particulares y empresas</div>
-        </div>
-        <div class="kpi g">
-          <div class="kpi-lbl">ITP calculado</div>
-          <div class="kpi-num">${eur(k.impuestosMes)}</div>
-          <div class="kpi-sub">transferencias · este mes</div>
+        <div class="pnl-acciones">
+          <button class="btn btn-ghost btn-sm" id="pnl-csv">Exportar CSV</button>
+          <button class="btn btn-ghost btn-sm" id="pnl-print">Imprimir / PDF</button>
+          <button class="btn" data-nuevo-exp>+ Nuevo expediente</button>
         </div>
       </div>
 
-      <div class="stack">
+      <div class="pnl-filtros" role="group" aria-label="Filtros del panel">
+        <label>
+          <span>Periodo</span>
+          <select id="f-periodo">
+            ${window.GTPanel.PERIODOS.map(p =>
+              `<option value="${h(p.id)}" ${gerenciaFiltros.periodo === p.id ? 'selected' : ''}>${h(p.label)}</option>`).join('')}
+          </select>
+        </label>
+        ${GTAuth.isAdmin() ? `<label>
+          <span>Agente</span>
+          <select id="f-gestor">
+            <option value="">Todos los agentes</option>
+            ${gerenciaDatos.usuarios.map(u =>
+              `<option value="${h(u.id)}" ${gerenciaFiltros.gestor === u.id ? 'selected' : ''}>${h(u.nombre)}</option>`).join('')}
+          </select>
+        </label>` : ''}
+        <label>
+          <span>Trámite</span>
+          <select id="f-tipo">
+            <option value="">Todos los trámites</option>
+            ${window.GT_TRAMITES.map(tr =>
+              `<option value="${h(tr.id)}" ${gerenciaFiltros.tipo === tr.id ? 'selected' : ''}>${h(tr.corto || tr.nombre)}</option>`).join('')}
+          </select>
+        </label>
+        ${(gerenciaFiltros.gestor || gerenciaFiltros.tipo) ? `<button class="pnl-limpiar" id="f-limpiar">Quitar filtros</button>` : ''}
+      </div>
+
+      ${m.historial.filas === 0 ? `<div class="pnl-avisoh">
+        <b>El historial de estados acaba de empezar.</b>
+        <p>Los tiempos —cuánto se tarda en tramitar y dónde se atasca— se miden con la
+        fecha de cada cambio de estado, que se registra desde ahora. Los expedientes que
+        ya existían no tienen recorrido guardado, así que esas métricas dirán «sin datos
+        suficientes» hasta que los expedientes nuevos empiecen a moverse.
+        <b>No se estiman con <code>updated_at</code></b>: esa fecha cambia al guardar
+        cualquier cosa y daría tiempos cortos y creíbles que no ha medido nadie.</p>
+      </div>` : (m.historial.parcial ? `<div class="pnl-avisoh pnl-avisoh-leve">
+        <b>Historial parcial en este periodo.</b>
+        <p>Solo hay registro de cambios de estado desde el ${h(fecha(m.historial.desde))}.
+        Lo anterior a esa fecha no consta, así que los cierres y los tiempos de este
+        periodo pueden quedarse cortos.</p>
+      </div>` : '')}
+
+      <div class="pnl-kpis">
+        ${tarjetaKpi(m.kpis.nuevos, 'var(--p2)')}
+        ${tarjetaKpi(m.kpis.tiempoMedio, 'var(--warn)')}
+        ${tarjetaKpi(m.kpis.facturacion, 'var(--g)')}
+        ${tarjetaKpi(m.kpis.gestia, 'var(--p)')}
+      </div>
+
+      <div class="pnl-duo">
         <div class="card">
-          <div class="card-t">Expedientes por estado</div>
-          <div class="estado-bars">
-            ${window.GT_ESTADOS.map(e => `
-              <div class="estado-bar-row">
-                <span class="t-muted">${h(e.label)}</span>
-                <div class="estado-bar-track">
-                  <div class="estado-bar-fill" style="width:${(k.porEstado[e.id] / maxEstado * 100).toFixed(1)}%;background:${e.color}"></div>
+          <div class="card-t">Embudo por estado</div>
+          <p class="pnl-sub">De los ${m.totales.periodo} expedientes dados de alta en el periodo, dónde está cada uno hoy.</p>
+          ${m.totales.periodo ? `<div class="pnl-embudo">
+            ${m.embudo.map(e => `
+              <div class="pnl-emb-row">
+                <span class="pnl-emb-lbl">${h(e.label)}</span>
+                <div class="pnl-emb-track">
+                  <div class="pnl-emb-fill" style="width:${Math.max(e.rel * 100, e.n ? 3 : 0).toFixed(1)}%;background:${e.color}"></div>
                 </div>
-                <b>${k.porEstado[e.id]}</b>
+                <b class="pnl-emb-n">${e.n}</b>
+                <span class="pnl-emb-pct">${cifra(e.pct)}%</span>
+              </div>`).join('')}
+          </div>` : bloqueSinDatos('No hay expedientes dados de alta en este periodo.')}
+        </div>
+
+        <div class="card">
+          <div class="card-t">Por tipo de trámite</div>
+          <p class="pnl-sub">Expedientes del periodo, de más a menos.</p>
+          ${m.tipos.length ? `<div class="pnl-embudo">
+            ${m.tipos.map(t => `
+              <div class="pnl-emb-row">
+                <span class="pnl-emb-lbl">${h(t.label)}</span>
+                <div class="pnl-emb-track">
+                  <div class="pnl-emb-fill" style="width:${Math.max(t.rel * 100, 3).toFixed(1)}%;background:var(--p)"></div>
+                </div>
+                <b class="pnl-emb-n">${t.n}</b>
+                <span class="pnl-emb-pct">${cifra(Math.round(t.n / m.totales.periodo * 1000) / 10)}%</span>
+              </div>`).join('')}
+          </div>` : bloqueSinDatos('No hay expedientes dados de alta en este periodo.')}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-t">Tiempos por estado · dónde se atasca</div>
+        <p class="pnl-sub">
+          Media de días que un expediente pasa en cada estado. Cuenta también los que
+          siguen ahí ahora mismo: un expediente está atascado mientras lo está, no
+          cuando por fin sale.
+        </p>
+        ${m.tiempos.sinDatos ? bloqueSinDatos(m.tiempos.motivo) : `
+          <div class="pnl-tiempos">
+            ${m.tiempos.estados.filter(e => e.dias !== null).map(e => `
+              <div class="pnl-t-row${e.cuello ? ' pnl-t-cuello' : ''}">
+                <span class="pnl-emb-lbl">${h(e.label)}</span>
+                <div class="pnl-emb-track">
+                  <div class="pnl-emb-fill" style="width:${Math.max(e.rel * 100, 3).toFixed(1)}%;background:${e.cuello ? 'var(--warn)' : e.color}"></div>
+                </div>
+                <b class="pnl-t-dias">${cifra(e.dias)} d</b>
+                ${e.cuello ? '<span class="pnl-chip-cuello">cuello de botella</span>' : '<span></span>'}
               </div>`).join('')}
           </div>
-        </div>
-
-        <div class="card">
-          <div class="card-t">Expedientes por tipo de trámite</div>
-          <div class="estado-bars">
-            ${window.GT_TRAMITES.map(tr => {
-              const n = expedientes.filter(e => e.tipo_tramite === tr.id).length;
-              const max = Math.max(1, ...window.GT_TRAMITES.map(t2 => expedientes.filter(e => e.tipo_tramite === t2.id).length));
-              return `<div class="estado-bar-row">
-                <span class="t-muted">${h(tr.corto)}</span>
-                <div class="estado-bar-track">
-                  <div class="estado-bar-fill" style="width:${(n / max * 100).toFixed(1)}%;background:var(--p)"></div>
-                </div>
-                <b>${n}</b>
-              </div>`;
-            }).join('')}
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-t">Últimos expedientes</div>
-          ${recientes.length ? `<div class="table-wrap"><table>
-            <thead><tr><th>Referencia</th><th>Trámite</th><th>Cliente</th><th>Vehículo</th><th>Estado</th></tr></thead>
-            <tbody>${recientes.map(e => `
-              <tr class="clickable" data-exp="${h(e.id)}">
-                <td class="t-mono">${h(e.referencia)}</td>
-                <td><span class="badge badge-tramite">${h(T.tramite(e.tipo_tramite).corto)}</span></td>
-                <td>${h(nombreCliente(e.cliente))}</td>
-                <td>${h([e.marca, e.modelo].filter(Boolean).join(' ') || '—')}<br><span class="t-muted" style="font-size:.76rem">${h(e.matricula || '')}</span></td>
-                <td><span class="badge badge-${h(e.estado)}">${h(estadoInfo(e.estado).label)}</span></td>
-              </tr>`).join('')}</tbody></table></div>`
-          : `<div class="empty"><p>Todavía no hay expedientes. Crea el primero para ver el flujo completo.</p><button class="btn" data-nuevo-exp>+ Nuevo expediente</button></div>`}
-        </div>
-
-        ${avisoRegulado()}
+          <p class="pnl-pie">Medido sobre ${m.tiempos.expedientes} expediente(s) del periodo con el alta
+          registrada${m.tiempos.abiertos ? `, de los que ${m.tiempos.abiertos} siguen en curso` : ''}.
+          Los expedientes cuya historia empieza a la mitad quedan fuera: no se sabe cuándo entraron.</p>`}
       </div>
+
+      <div class="card">
+        <div class="card-t">Rendimiento por agente</div>
+        <p class="pnl-sub">
+          «Activos» es lo que cada uno tiene encima de la mesa HOY. El resto es del periodo.
+        </p>
+        ${m.agentes.length ? `<div class="table-wrap"><table class="pnl-tabla">
+          <thead><tr>
+            <th>Agente</th>
+            <th class="num">Activos</th>
+            <th class="num">Nuevos</th>
+            <th class="num">Cerrados</th>
+            <th class="num">Tiempo medio</th>
+            <th class="num">Gest-IA</th>
+            <th class="num">Facturado</th>
+          </tr></thead>
+          <tbody>${m.agentes.map(a => `
+            <tr>
+              <td><b>${h(a.nombre)}</b>${a.rol === 'admin' ? ' <span class="badge badge-admin">admin</span>' : ''}${
+                a.inactivo ? ' <span class="badge badge-inactivo">desactivado</span>' : ''}${
+                a.huerfano ? ' <span class="badge badge-inactivo" title="Expedientes sin gestor asignado, o de un usuario que ya no está en la lista. Salen aparte para que la columna sume el total.">sin gestor</span>' : ''}</td>
+              <td class="num">${a.activos}</td>
+              <td class="num">${a.nuevos}</td>
+              <td class="num">${a.cerrados}</td>
+              <td class="num">${a.tiempoMedio === null
+                ? '<span class="t-muted" title="Ningún expediente suyo con el alta registrada se ha cerrado en el periodo">sin datos</span>'
+                : cifra(a.tiempoMedio) + ' d'}</td>
+              <td class="num">${a.pctIa === null ? '<span class="t-muted">—</span>' : cifra(a.pctIa) + ' %'}</td>
+              <td class="num">${a.conHonorarios
+                ? eur(a.facturado)
+                : '<span class="t-muted" title="Ninguno de sus expedientes del periodo tiene honorarios registrados">sin datos</span>'}</td>
+            </tr>`).join('')}</tbody>
+        </table></div>` : bloqueSinDatos('Ningún agente tiene expedientes que encajen con los filtros.')}
+      </div>
+
+      <div class="card">
+        <div class="card-t">Alertas accionables${A.total ? ` <span class="pnl-badge-n">${A.total}</span>` : ''}</div>
+        <p class="pnl-sub">No dependen del periodo: un DNI caducado no deja de estarlo porque cambie el mes.</p>
+        ${gruposAlerta.length ? gruposAlerta.map(g => `
+          <div class="pnl-alerta pnl-alerta-${g.nivel}">
+            <div class="pnl-alerta-cab">
+              <b>${h(g.titulo)}</b>
+              <span class="pnl-badge-n">${g.lista.length}</span>
+            </div>
+            <p class="pnl-alerta-pie">${h(g.pie)}</p>
+            <ul class="pnl-alerta-lista">
+              ${g.lista.map(x => `
+                <li>
+                  <button class="pnl-alerta-ref" data-exp="${h(x.id)}">${h(x.referencia)}</button>
+                  <span>${h(x.texto)}</span>
+                  ${x.gestor ? `<em>${h(x.gestor)}</em>` : ''}
+                </li>`).join('')}
+            </ul>
+          </div>`).join('')
+        : `<div class="pnl-todobien">
+            <b>Nada que reclamar.</b>
+            <p>Ningún expediente visible está bloqueado por cambio de servicio, con el DNI
+            caducado, con documentación obligatoria pendiente ni con datos que no cuadren.</p>
+          </div>`}
+      </div>
+
+      ${avisoRegulado()}
       ${footer()}`;
 
-    view.querySelectorAll('[data-nuevo-exp]').forEach(b => b.addEventListener('click', () => (location.hash = '#/expedientes/nuevo')));
-    view.querySelectorAll('[data-exp]').forEach(tr => tr.addEventListener('click', () => (location.hash = '#/expedientes/' + tr.dataset.exp)));
+    /* ---- Interacción ---- */
+    const recargar = () => pintarGerencia();
+    const sel = (id, campo) => {
+      const el = view.querySelector('#' + id);
+      if (el) el.addEventListener('change', () => { gerenciaFiltros[campo] = el.value; recargar(); });
+    };
+    sel('f-periodo', 'periodo');
+    sel('f-gestor', 'gestor');
+    sel('f-tipo', 'tipo');
+
+    const limpiar = view.querySelector('#f-limpiar');
+    if (limpiar) limpiar.addEventListener('click', () => {
+      gerenciaFiltros.gestor = ''; gerenciaFiltros.tipo = ''; recargar();
+    });
+
+    view.querySelector('#pnl-print').addEventListener('click', () => window.print());
+    view.querySelector('#pnl-csv').addEventListener('click', () => exportarPanelCsv(m));
+
+    view.querySelectorAll('[data-nuevo-exp]').forEach(b =>
+      b.addEventListener('click', () => (location.hash = '#/expedientes/nuevo')));
+    view.querySelectorAll('[data-exp]').forEach(el =>
+      el.addEventListener('click', () => (location.hash = '#/expedientes/' + el.dataset.exp)));
+  }
+
+  /**
+   * El panel en CSV, con las mismas cifras que hay en pantalla.
+   *
+   * Punto y coma y BOM porque el Excel en español lo abre así; sin el BOM las
+   * tildes salen rotas y el fichero parece corrupto.
+   *
+   * Lo que en pantalla dice «sin datos suficientes» aquí sale VACÍO, no 0. Una
+   * hoja de cálculo suma y promedia las celdas: un cero de relleno se convierte
+   * en un total falso en cuanto alguien arrastra una fórmula.
+   */
+  function exportarPanelCsv(m) {
+    const c = (v) => {
+      if (v === null || v === undefined) return '';
+      const s = String(v).replace(/"/g, '""');
+      return /[";\n]/.test(s) ? `"${s}"` : s;
+    };
+    // Decimal con coma: es lo que espera el Excel en español.
+    const n = (v) => v === null || v === undefined ? '' : String(v).replace('.', ',');
+    const filas = [];
+    const bloque = (titulo, cab, datos) => {
+      filas.push([titulo]);
+      if (cab) filas.push(cab);
+      datos.forEach(f => filas.push(f));
+      filas.push([]);
+    };
+
+    filas.push(['GestoTrafic · Panel de gerencia']);
+    filas.push(['Periodo', m.rango.label]);
+    filas.push(['Comparado con', m.rango.previo.label]);
+    filas.push(['Ámbito', m.esAdmin ? 'Todos los agentes' : 'Solo mis expedientes']);
+    filas.push(['Filtro de agente', m.filtros.gestor
+      ? (gerenciaDatos.usuarios.find(u => u.id === m.filtros.gestor) || {}).nombre || m.filtros.gestor : 'todos']);
+    filas.push(['Filtro de trámite', m.filtros.tipo || 'todos']);
+    filas.push(['Generado', new Date().toLocaleString('es-ES')]);
+    filas.push([]);
+
+    bloque('INDICADORES', ['Indicador', 'Valor', 'Periodo anterior', 'Variación', 'Nota'],
+      Object.keys(m.kpis).map(k => {
+        const x = m.kpis[k];
+        return x.sinDatos
+          ? [x.etiqueta, '', '', '', 'sin datos suficientes: ' + x.motivo]
+          : [x.etiqueta, n(x.valor), x.delta ? n(x.delta.previo) : '',
+             x.delta ? n(x.delta.abs) + (x.delta.pct === null ? '' : ' (' + n(x.delta.pct) + '%)') : '',
+             x.nota || ''];
+      }));
+
+    bloque('EMBUDO POR ESTADO', ['Estado', 'Expedientes', '% del periodo'],
+      m.embudo.map(e => [e.label, e.n, n(e.pct)]));
+
+    bloque('POR TIPO DE TRÁMITE', ['Trámite', 'Expedientes'],
+      m.tipos.map(t => [t.label, t.n]));
+
+    bloque('TIEMPOS POR ESTADO (días de media)', ['Estado', 'Días', 'Tramos medidos', 'Cuello de botella'],
+      m.tiempos.sinDatos
+        ? [['sin datos suficientes: ' + m.tiempos.motivo]]
+        : m.tiempos.estados.map(e => [e.label, n(e.dias), e.n, e.cuello ? 'sí' : '']));
+
+    bloque('RENDIMIENTO POR AGENTE',
+      ['Agente', 'Activos hoy', 'Nuevos', 'Cerrados', 'Tiempo medio (días)', '% Gest-IA', 'Facturado (€)'],
+      m.agentes.map(a => [a.nombre, a.activos, a.nuevos, a.cerrados,
+        n(a.tiempoMedio), n(a.pctIa), a.conHonorarios ? n(a.facturado) : '']));
+
+    const A = m.alertas;
+    bloque('ALERTAS', ['Tipo', 'Expediente', 'Agente', 'Detalle'],
+      [].concat(
+        A.servicio.map(x => ['Bloqueado por cambio de servicio', x.referencia, x.gestor, x.texto]),
+        A.dniCaducado.map(x => ['DNI caducado', x.referencia, x.gestor, x.texto]),
+        A.docPendiente.map(x => ['Documentación pendiente', x.referencia, x.gestor, x.texto]),
+        A.validacion.map(x => ['Datos que no cuadran', x.referencia, x.gestor, x.texto])
+      ));
+
+    const csv = '﻿' + filas.map(f => f.map(c).join(';')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'gestotrafic-panel-' + m.rango.label.replace(/\s+/g, '-').toLowerCase() + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast('Panel exportado a CSV', 'ok');
   }
 
   /* ============================================================
