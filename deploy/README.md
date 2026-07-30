@@ -8,6 +8,7 @@ deploy/
   install/
     01_schema.sql                   esquema consolidado, idempotente
     02_seed_precios_medios.sql      70.931 filas del Anexo I del BOE
+    03_credenciales.sql             credenciales ICOGAM (cifradas, write-only)
     functions/README.md             dónde está el código de las Edge Functions
 ```
 
@@ -29,6 +30,7 @@ export SUPABASE_ACCESS_TOKEN='sbp_...'      # Account → Access Tokens
 export SUPABASE_DB_URL='postgresql://postgres.<ref>:<clave>@...pooler.supabase.com:5432/postgres'
 export SUPABASE_SERVICE_ROLE_KEY='eyJ...'   # Project Settings → API Keys
 export ANTHROPIC_API_KEY='sk-ant-...'       # opcional: solo para Gest-IA
+export GESTOTRAFIC_CRED_KEY="$(openssl rand -base64 32)"   # cifra las credenciales ICOGAM
 
 ./deploy/provision.sh "Gestoría Martínez" abcdefghijklmnopqrst
 ```

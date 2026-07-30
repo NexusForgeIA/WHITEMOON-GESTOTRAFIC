@@ -3229,6 +3229,8 @@
           </form>
         </details>
 
+        <div id="oegam-gate"></div>
+
         <div class="row-actions">
           <button class="btn" id="btn-oegam">Exportar a OEGAM (XML)</button>
           <button class="btn btn-ghost" id="btn-oegam-ver">Ver el XML</button>
@@ -3241,6 +3243,30 @@
           No se guarda copia en ningún sitio: el archivo solo existe en tu descarga.
         </p>
       </div>`;
+
+    /* Gating - produccion con el Colegio.
+       Mientras la gestoria no tenga sus credenciales de ICOGAM configuradas,
+       la exportacion queda deshabilitada. Ojo: esto NO es la barrera de
+       seguridad. La barrera esta en el servidor, en la Edge Function que
+       usara las credenciales; deshabilitar un boton solo sirve para que el
+       gestor entienda por que no puede exportar todavia. */
+    (async () => {
+      const gate = cont.querySelector('#oegam-gate');
+      const btnX = cont.querySelector('#btn-oegam');
+      if (!gate || !btnX) return;
+      if (await GTCredenciales.listo()) return;
+
+      btnX.disabled = true;
+      btnX.title = GTCredenciales.AVISO;
+      gate.innerHTML =
+        '<div class="srv-aviso bloqueado" style="margin:14px 0">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>' +
+        '<div><b>Exportación deshabilitada</b><p>' + GTCredenciales.AVISO +
+        (GTAuth.isAdmin()
+          ? ' <a href="#/credenciales">Configurarlas ahora →</a>'
+          : ' Pídeselo al administrador de la gestoría.') +
+        '</p></div></div>';
+    })();
 
     cont.querySelector('#form-oegam').addEventListener('submit', async (ev) => {
       ev.preventDefault();
@@ -4400,6 +4426,157 @@
     document.body.appendChild(back);
   }
 
+  /* ---------------- Credenciales de la gestoría (ICOGAM) ----------------
+     Solo admin. La comprobación de rol se repite en el servidor: esto de
+     aquí es para que la interfaz no ofrezca lo que la función va a negar.
+
+     Los campos van vacíos SIEMPRE, incluso con algo ya guardado: no hay
+     forma de recuperar un secreto, así que no hay nada que precargar. Lo
+     que se ve es el estado —configurado o no, cuándo y una pista de 4
+     caracteres— y eso es deliberado, no una limitación de la pantalla. */
+  async function vistaCredenciales() {
+    if (!GTAuth.isAdmin()) { location.hash = '#/dashboard'; return; }
+
+    loading('Cargando credenciales…');
+    let est;
+    try {
+      est = await GTCredenciales.estado();
+    } catch (e) {
+      errorView(e);
+      return;
+    }
+
+    const chip = (ok, txt) =>
+      `<span class="badge badge-${ok ? 'recibido' : 'pendiente'}">${ok ? (txt || 'Configurado') : 'Sin configurar'}</span>`;
+    const fecha = (f) => (f ? new Date(f).toLocaleString('es-ES') : '—');
+
+    view.innerHTML = `
+      ${cabecera()}
+      <div class="page-head">
+        <div>
+          <h1>Credenciales</h1>
+          <p>Certificado colegial y claves de ICOGAM · solo el administrador</p>
+        </div>
+        ${chip(est.listo, 'Listo para operar')}
+      </div>
+
+      <div class="srv-aviso">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+        <div>
+          <b>Se guardan cifradas y no se pueden volver a ver</b>
+          <p>Se pueden reemplazar y borrar, pero no consultar: ni desde esta
+          pantalla, ni desde la base de datos. Si pierdes una, sube otra.</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-t">Certificado colegial</div>
+        <p class="t-muted" style="font-size:.82rem">
+          Fichero <span class="t-mono">.p12</span> o <span class="t-mono">.pfx</span> que entrega el Colegio, y su contraseña.
+        </p>
+        <dl class="dl">
+          <dt>Estado</dt><dd>${chip(est.cert_configurado)}</dd>
+          <dt>Fichero</dt><dd>${est.cert_nombre ? h(est.cert_nombre) + ' · ' + (est.cert_bytes || 0) + ' bytes' : '—'}</dd>
+          <dt>Subido</dt><dd>${fecha(est.cert_subido_at)}</dd>
+          <dt>Contraseña</dt><dd>${chip(est.cert_pass_configurada)}</dd>
+        </dl>
+        <form id="form-cert" style="margin-top:12px">
+          <label class="field">
+            <span>Certificado (.p12 / .pfx)</span>
+            <input type="file" name="cert" accept=".p12,.pfx,application/x-pkcs12">
+          </label>
+          <label class="field">
+            <span>Contraseña del certificado</span>
+            <input type="password" name="cert_pass" autocomplete="new-password" placeholder="••••••••">
+          </label>
+          <div class="row-actions">
+            <button type="submit" class="btn btn-sm">Guardar certificado</button>
+            ${est.cert_configurado ? '<button type="button" class="btn btn-danger btn-sm" data-borrar="certificado">Borrar</button>' : ''}
+          </div>
+        </form>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-t">Claves de acceso de ICOGAM</div>
+        <p class="t-muted" style="font-size:.82rem">
+          Clave API y/o token otorgados por el Colegio. Basta con una de las dos.
+        </p>
+        <dl class="dl">
+          <dt>Clave API</dt><dd>${chip(est.api_key_configurada)} ${est.api_key_pista ? '<span class="t-mono">' + h(est.api_key_pista) + '</span>' : ''}</dd>
+          <dt>Token</dt><dd>${chip(est.token_configurado)} ${est.token_pista ? '<span class="t-mono">' + h(est.token_pista) + '</span>' : ''}</dd>
+        </dl>
+        <form id="form-claves" style="margin-top:12px">
+          <label class="field">
+            <span>Clave API</span>
+            <input type="password" name="api_key" autocomplete="off" placeholder="Vacío = no cambiarla">
+          </label>
+          <label class="field">
+            <span>Token</span>
+            <input type="password" name="token" autocomplete="off" placeholder="Vacío = no cambiarlo">
+          </label>
+          <div class="row-actions">
+            <button type="submit" class="btn btn-sm">Guardar claves</button>
+            ${est.api_key_configurada ? '<button type="button" class="btn btn-danger btn-sm" data-borrar="api_key">Borrar clave API</button>' : ''}
+            ${est.token_configurado ? '<button type="button" class="btn btn-danger btn-sm" data-borrar="token">Borrar token</button>' : ''}
+          </div>
+        </form>
+      </div>
+
+      <p class="t-muted" style="font-size:.76rem;margin-top:16px">
+        Última actualización: ${fecha(est.actualizado_at)}${est.actualizado_por ? ' · ' + h(est.actualizado_por) : ''}
+      </p>`;
+
+    async function guardarY(fn) {
+      try {
+        await fn();
+        toast('Credenciales guardadas');
+        await vistaCredenciales();
+      } catch (e) {
+        toast(e.message || 'No se pudo guardar', true);
+      }
+    }
+
+    view.querySelector('#form-cert').addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const f = ev.target;
+      const file = f.cert.files[0];
+      const pass = f.cert_pass.value;
+      if (!file && !pass) { toast('No has puesto nada que guardar', true); return; }
+      guardarY(async () => {
+        const datos = {};
+        if (file) {
+          datos.cert_b64 = await GTCredenciales.ficheroABase64(file);
+          datos.cert_nombre = file.name;
+        }
+        if (pass) datos.cert_pass = pass;
+        await GTCredenciales.guardar(datos);
+      });
+    });
+
+    view.querySelector('#form-claves').addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const f = ev.target;
+      if (!f.api_key.value && !f.token.value) { toast('No has puesto nada que guardar', true); return; }
+      guardarY(async () => {
+        const datos = {};
+        if (f.api_key.value) datos.api_key = f.api_key.value;
+        if (f.token.value) datos.token = f.token.value;
+        await GTCredenciales.guardar(datos);
+      });
+    });
+
+    view.querySelectorAll('[data-borrar]').forEach(b => b.addEventListener('click', async () => {
+      if (!confirm('¿Borrar esta credencial? No se puede deshacer.')) return;
+      try {
+        await GTCredenciales.borrar(b.dataset.borrar);
+        toast('Credencial borrada');
+        await vistaCredenciales();
+      } catch (e) {
+        toast(e.message || 'No se pudo borrar', true);
+      }
+    }));
+  }
+
   async function router() {
     const hash = location.hash.replace(/^#/, '') || '/dashboard';
     const [ruta, query] = hash.split('?');
@@ -4431,6 +4608,8 @@
         await vistaGestIA(params.get('tipo'));
       } else if (seccion === 'gestores') {
         await vistaGestores();
+      } else if (seccion === 'credenciales') {
+        await vistaCredenciales();
       } else {
         await vistaDashboard();
       }
@@ -4457,7 +4636,10 @@
 
     // "Gestores" solo existe para el admin. Ocultarlo es cosmético: la
     // vista se corta sola y el RLS no deja tocar usuarios a un gestor.
-    if (GTAuth.isAdmin()) document.getElementById('nav-gestores').classList.remove('hidden');
+    if (GTAuth.isAdmin()) {
+      document.getElementById('nav-gestores').classList.remove('hidden');
+      document.getElementById('nav-credenciales').classList.remove('hidden');
+    }
 
     // Sin esperar a que la sesión entre en el cliente, la primera consulta
     // saldría como anon y el RLS la devolvería vacía.

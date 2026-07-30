@@ -5,7 +5,8 @@ Pages, con Supabase detrás (proyecto `mlaqtniujnvfxcvcourm`).
 
 Documentación funcional en [`docs/`](docs/): [FASE-1](docs/FASE-1.md) ·
 [TRAMITES](docs/TRAMITES.md) · [USUARIOS](docs/USUARIOS.md) ·
-[GEST-IA](docs/GEST-IA.md) · [OEGAM](docs/OEGAM.md) · [PANEL](docs/PANEL.md).
+[GEST-IA](docs/GEST-IA.md) · [OEGAM](docs/OEGAM.md) · [PANEL](docs/PANEL.md) ·
+[CREDENCIALES](docs/CREDENCIALES.md).
 
 ---
 

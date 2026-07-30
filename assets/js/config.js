@@ -46,6 +46,12 @@ window.GT_CONFIG = {
      orden que exige la política del bucket. */
   FN_BORRAR_EXPEDIENTE: 'gestotrafic-borrar-expediente',
 
+  /* Credenciales de ICOGAM (certificado colegial, clave API y token).
+     Va por Edge Function porque es la única que tiene la clave de cifrado:
+     la tabla `gestotrafic_credenciales` es inalcanzable desde el navegador
+     y los secretos no se pueden volver a leer una vez guardados. */
+  FN_CREDENCIALES: 'gestotrafic-credenciales',
+
   /* Colegio cuyo formato de exportación se usa. Hoy solo hay uno; el
      exportador (assets/js/oegam.js) está aislado para que añadir otro sea
      añadir un módulo, no tocar la ficha del expediente. */

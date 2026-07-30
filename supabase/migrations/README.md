@@ -23,6 +23,7 @@ Todo vive bajo el prefijo `gestotrafic_*`. La única referencia fuera de él es
 | 9 | `gestotrafic_buscar_valor_base` / `_fix` | Funciones de búsqueda del valor base; devuelven `encontrado=false` en vez de inventar |
 | 10 | `gestotrafic_precios_medios_columnas_turismo` | Añade `num_cilindros`, `potencia_kw` y `potencia_cv` (columnas reales del Anexo I) y retira `co2`, que el anexo no publica |
 | 11 | `gestotrafic_buscar_valor_base_turismo` | `gestotrafic_orden_vigente()` + búsqueda con `p_id` para fijar una versión concreta, filtrada por la Orden vigente |
+| 12 | `gestotrafic_credenciales` | Tabla `gestotrafic_credenciales` (secretos de ICOGAM cifrados), RLS **sin políticas** + `revoke` a anon/authenticated, y las funciones `gestotrafic_credenciales_estado()` (admin) y `_listo()` (gating). Ver [`../../docs/CREDENCIALES.md`](../../docs/CREDENCIALES.md) |
 | 12 | `gestotrafic_precios_catalogo_turismo` | `..._marcas` / `..._modelos` / `..._versiones` para los desplegables, con `execute` solo para `authenticated` |
 | 13 | `gestotrafic_buscar_valor_base_solo_servidor` | Cierra el `execute` de las funciones de búsqueda a `anon` (las usa la Edge Function con `service_role`) |
 | 14 | `gestotrafic_precios_modelos_sin_duplicar_por_mayusculas` | El BOE escribe «MEGANE» y «Megane»: se agrupa sin distinguir caja para no ofrecer entradas duplicadas |
