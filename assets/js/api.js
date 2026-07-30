@@ -494,34 +494,36 @@
     }).select().single());
   }
 
-  /* ---------------- KPIs ---------------- */
+  /* ---------------- Panel de gerencia ---------------- */
 
-  async function kpis() {
-    var clientes = unwrap(await sb.from(C.TABLA_CLIENTES).select('id', { count: 'exact', head: false }));
-    var expedientes = unwrap(await sb.from(C.TABLA_EXPEDIENTES).select('id, estado, created_at, total_impuestos'));
-
-    var inicioMes = new Date();
-    inicioMes.setDate(1);
-    inicioMes.setHours(0, 0, 0, 0);
-
-    var porEstado = {};
-    global.GT_ESTADOS.forEach(function (e) { porEstado[e.id] = 0; });
-
-    var delMes = 0, facturacionMes = 0;
-    expedientes.forEach(function (e) {
-      if (porEstado[e.estado] !== undefined) porEstado[e.estado]++;
-      if (new Date(e.created_at) >= inicioMes) {
-        delMes++;
-        facturacionMes += Number(e.total_impuestos) || 0;
-      }
-    });
-
+  /**
+   * Todo lo que el panel necesita para contar, en una tanda.
+   *
+   * No se agrega nada en el servidor a propósito: las cuatro consultas traen
+   * filas y quien las cuenta es `GTPanel`, que se puede ejecutar en node y
+   * verificar contra la base (`node tools/verificar-panel.js`). Con las cuentas
+   * hechas en SQL, el panel sería la única versión de sí mismo y no habría
+   * forma de comprobarlo sin volver a escribirlo.
+   *
+   * El aislamiento por gestor NO se filtra aquí: lo hace el RLS, el mismo que
+   * en todo el CRM. Un gestor recibe sus expedientes, el historial de esos
+   * expedientes y su propia ficha de usuario, así que el panel que se le pinta
+   * sale de sus datos sin que este fichero decida nada.
+   */
+  async function datosPanel() {
+    var r = await Promise.all([
+      sb.from(C.TABLA_EXPEDIENTES).select(SELECT_EXP).order('created_at', { ascending: false }),
+      sb.from(C.TABLA_HISTORIAL)
+        .select('expediente_id, estado, estado_anterior, gestor_id, created_at')
+        .order('created_at', { ascending: true }),
+      sb.from(C.TABLA_DOCUMENTOS).select('id, expediente_id, tipo'),
+      listarUsuarios()
+    ]);
     return {
-      totalClientes: clientes.length,
-      totalExpedientes: expedientes.length,
-      expedientesMes: delMes,
-      impuestosMes: facturacionMes,
-      porEstado: porEstado
+      expedientes: unwrap(r[0]),
+      historial: unwrap(r[1]),
+      documentos: unwrap(r[2]),
+      usuarios: r[3]
     };
   }
 
@@ -561,6 +563,6 @@
     generarExpediente: generarExpediente,
     subirArchivo: subirArchivo,
     registrarDocumento: registrarDocumento,
-    kpis: kpis
+    datosPanel: datosPanel
   };
 })(window);

@@ -127,6 +127,28 @@ create table if not exists public.gestotrafic_documentos (
   created_at timestamp with time zone default now() not null
 );
 
+/* Historial de cambios de estado del expediente.
+
+   Sin esta tabla no existen los tiempos por estado ni el tiempo medio de
+   tramitación, y no hay forma de deducirlos: `updated_at` cambia con
+   cualquier edición —guardar honorarios, calcular el ITP— y no dice nada de
+   cuándo pasó el expediente de un estado a otro. Usarlo como si lo dijera es
+   justo el número plausible y equivocado que este proyecto no admite.
+
+   Las filas las escribe un TRIGGER (§6b), no la aplicación. */
+create table if not exists public.gestotrafic_estado_historial (
+  id uuid default gen_random_uuid() not null,
+  expediente_id uuid not null,
+  estado text not null,
+  -- NULL SOLO en la fila del alta. Es lo que distingue un expediente cuyo
+  -- recorrido se conoce entero de otro cuya historia empieza a la mitad
+  -- (los que ya existían cuando se creó esta tabla).
+  estado_anterior text,
+  gestor_id uuid,   -- a quién estaba ASIGNADO el expediente en ese momento
+  autor_id uuid,    -- quién HIZO el cambio; NULL si fue el servidor
+  created_at timestamp with time zone default now() not null
+);
+
 create table if not exists public.gestotrafic_precios_medios (
   id uuid default gen_random_uuid() not null,
   tipo_vehiculo text not null,
@@ -193,6 +215,20 @@ begin
        'FOREIGN KEY (expediente_id) REFERENCES gestotrafic_expedientes(id) ON DELETE CASCADE'),
       ('gestotrafic_documentos','gestotrafic_documentos_estado_check',
        'CHECK ((estado = ANY (ARRAY[''pendiente''::text, ''recibido''::text])))'),
+
+      ('gestotrafic_estado_historial','gestotrafic_estado_historial_pkey','PRIMARY KEY (id)'),
+      ('gestotrafic_estado_historial','gestotrafic_estado_historial_expediente_id_fkey',
+       'FOREIGN KEY (expediente_id) REFERENCES gestotrafic_expedientes(id) ON DELETE CASCADE'),
+      ('gestotrafic_estado_historial','gestotrafic_estado_historial_gestor_id_fkey',
+       'FOREIGN KEY (gestor_id) REFERENCES gestotrafic_usuarios(id) ON DELETE SET NULL'),
+      ('gestotrafic_estado_historial','gestotrafic_estado_historial_autor_id_fkey',
+       'FOREIGN KEY (autor_id) REFERENCES gestotrafic_usuarios(id) ON DELETE SET NULL'),
+      ('gestotrafic_estado_historial','gestotrafic_estado_historial_estado_check',
+       'CHECK ((estado = ANY (ARRAY[''nuevo''::text, ''documentacion''::text, ''tramitacion''::text, ''presentado''::text, ''completado''::text])))'),
+      ('gestotrafic_estado_historial','gestotrafic_estado_historial_estado_anterior_check',
+       'CHECK ((estado_anterior IS NULL) OR (estado_anterior = ANY (ARRAY[''nuevo''::text, ''documentacion''::text, ''tramitacion''::text, ''presentado''::text, ''completado''::text])))'),
+      ('gestotrafic_estado_historial','gestotrafic_estado_historial_distinto_check',
+       'CHECK ((estado_anterior IS NULL) OR (estado_anterior <> estado))'),
 
       ('gestotrafic_precios_medios','gestotrafic_precios_medios_pkey','PRIMARY KEY (id)'),
       ('gestotrafic_precios_medios','gestotrafic_precios_medios_valor_base_euros_check',
@@ -287,6 +323,13 @@ create index if not exists gestotrafic_exp_matricula_norm_idx
 
 create index if not exists gestotrafic_doc_exp_idx
   on public.gestotrafic_documentos using btree (expediente_id);
+
+-- El panel lee el historial de dos maneras: el recorrido de un expediente
+-- (para sus tiempos) y todo lo ocurrido en un periodo (para los del mes).
+create index if not exists gestotrafic_estado_historial_exp_idx
+  on public.gestotrafic_estado_historial using btree (expediente_id, created_at);
+create index if not exists gestotrafic_estado_historial_fecha_idx
+  on public.gestotrafic_estado_historial using btree (created_at);
 
 create index if not exists gestotrafic_precios_marca_modelo_idx
   on public.gestotrafic_precios_medios using btree (tipo_vehiculo, lower(marca), lower(modelo))
@@ -515,6 +558,53 @@ as $$
 $$;
 
 -- ------------------------------------------------------------
+-- 6b · Historial de estados · el trigger que lo escribe
+-- ------------------------------------------------------------
+
+/* El historial lo escribe la BASE DE DATOS, no la aplicación.
+
+   Un registro que hay que acordarse de escribir en cada sitio que cambia el
+   estado —la ficha, el Kanban, el arrastre entre columnas, lo que se añada
+   mañana— se queda a medias en cuanto aparece el sitio nuevo. Y un historial
+   con huecos miente peor que uno vacío: los tiempos salen cortos y parecen
+   buenos. Aquí no hay forma de mover un expediente sin dejar la fila.
+
+   SECURITY DEFINER porque la tabla no tiene `insert` para nadie: la única
+   manera de escribir en ella es pasando por este trigger. */
+create or replace function public.gestotrafic_registrar_estado()
+returns trigger language plpgsql security definer
+set search_path to 'public', 'pg_temp'
+as $$
+begin
+  insert into public.gestotrafic_estado_historial
+    (expediente_id, estado, estado_anterior, gestor_id, autor_id)
+  values (
+    new.id,
+    new.estado,
+    -- El alta no viene de ningún estado: esa fila es la que marca que del
+    -- expediente se conoce el recorrido completo.
+    case when tg_op = 'UPDATE' then old.estado else null end,
+    new.gestor_id,
+    auth.uid()
+  );
+  return null;
+end $$;
+
+drop trigger if exists gestotrafic_expedientes_historial_ins on public.gestotrafic_expedientes;
+drop trigger if exists gestotrafic_expedientes_historial_upd on public.gestotrafic_expedientes;
+
+create trigger gestotrafic_expedientes_historial_ins
+  after insert on public.gestotrafic_expedientes
+  for each row execute function public.gestotrafic_registrar_estado();
+
+-- `of estado` + `is distinct from`: guardar la ficha veinte veces sin tocar el
+-- estado no deja veinte filas. Solo se registra lo que de verdad se movió.
+create trigger gestotrafic_expedientes_historial_upd
+  after update of estado on public.gestotrafic_expedientes
+  for each row when (old.estado is distinct from new.estado)
+  execute function public.gestotrafic_registrar_estado();
+
+-- ------------------------------------------------------------
 -- 7 · RLS y políticas
 -- ------------------------------------------------------------
 alter table public.gestotrafic_clientes       enable row level security;
@@ -522,6 +612,7 @@ alter table public.gestotrafic_usuarios       enable row level security;
 alter table public.gestotrafic_expedientes    enable row level security;
 alter table public.gestotrafic_documentos     enable row level security;
 alter table public.gestotrafic_precios_medios enable row level security;
+alter table public.gestotrafic_estado_historial enable row level security;
 
 -- Postgres no tiene `create policy if not exists`: se borra y se recrea.
 drop policy if exists gestotrafic_clientes_todos      on public.gestotrafic_clientes;
@@ -533,6 +624,7 @@ drop policy if exists gestotrafic_expedientes_update  on public.gestotrafic_expe
 drop policy if exists gestotrafic_expedientes_delete  on public.gestotrafic_expedientes;
 drop policy if exists gestotrafic_documentos_all      on public.gestotrafic_documentos;
 drop policy if exists gestotrafic_precios_select      on public.gestotrafic_precios_medios;
+drop policy if exists gestotrafic_estado_historial_select on public.gestotrafic_estado_historial;
 
 create policy gestotrafic_clientes_todos on public.gestotrafic_clientes
   for all to authenticated using (true) with check (true);
@@ -570,6 +662,15 @@ create policy gestotrafic_documentos_all on public.gestotrafic_documentos
                  where e.id = gestotrafic_documentos.expediente_id
                    and (public.gestotrafic_es_admin() or e.gestor_id = auth.uid())));
 
+-- Del historial se ve exactamente lo mismo que del expediente: el admin todo,
+-- el gestor lo suyo. La regla no se reimplementa aquí, se pregunta a la tabla
+-- padre, que es donde vive.
+create policy gestotrafic_estado_historial_select on public.gestotrafic_estado_historial
+  for select to authenticated
+  using (exists (select 1 from public.gestotrafic_expedientes e
+                 where e.id = gestotrafic_estado_historial.expediente_id
+                   and (public.gestotrafic_es_admin() or e.gestor_id = auth.uid())));
+
 -- Los precios medios son públicos del BOE: los lee cualquier gestor con sesión.
 create policy gestotrafic_precios_select on public.gestotrafic_precios_medios
   for select to authenticated using (true);
@@ -583,11 +684,26 @@ revoke all on public.gestotrafic_expedientes from anon;
 revoke all on public.gestotrafic_documentos  from anon;
 revoke all on public.gestotrafic_usuarios    from anon, authenticated;
 revoke all on public.gestotrafic_precios_medios from anon, authenticated;
+revoke all on public.gestotrafic_estado_historial from anon, authenticated;
 
 grant select, insert, update, delete on public.gestotrafic_clientes    to authenticated;
 grant select, insert, update, delete on public.gestotrafic_expedientes to authenticated;
 grant select, insert, update, delete on public.gestotrafic_documentos  to authenticated;
 grant select on public.gestotrafic_precios_medios to authenticated;
+
+/* El historial es de SOLO LECTURA para el navegador, a propósito. Es la
+   prueba de cuánto se tardó en cada estado: si se pudiera escribir a mano
+   desde el cliente dejaría de serlo. Las filas las pone el trigger. */
+grant select on public.gestotrafic_estado_historial to authenticated;
+
+/* La función del trigger NO es una API. Sin este revoke, PostgREST la publica
+   en /rest/v1/rpc/ como una SECURITY DEFINER más. Llamarla desde ahí no
+   llegaría a hacer nada —Postgres no deja invocar directamente una función
+   `returns trigger`—, pero es superficie que no hace falta.
+
+   El trigger sigue disparando: el privilegio EXECUTE se comprueba al CREAR el
+   trigger, no cada vez que salta. */
+revoke execute on function public.gestotrafic_registrar_estado() from public, anon, authenticated;
 
 -- `password_hash` NO se concede: el RLS filtra filas, no columnas, y sin este
 -- grant por columna un gestor no puede leer el hash ni siquiera de su propia

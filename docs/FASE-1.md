@@ -49,11 +49,16 @@ el **RLS** de la base de datos, no la interfaz.
 Detalle completo, incluida la matriz de lo que está cerrado y por qué, en
 [`USUARIOS.md`](USUARIOS.md).
 
-### 2 · Dashboard
+### 2 · Panel de gerencia
 
-KPIs ligeros: expedientes activos, expedientes del mes, clientes totales e
-impuestos calculados en el mes. Barras de expedientes por estado y tabla de los
-últimos expedientes.
+Cuatro indicadores con variación contra el periodo anterior y mini-tendencia,
+embudo por estado, reparto por trámite, tiempos por estado con el cuello de
+botella señalado, rendimiento por agente y alertas accionables. Filtros de
+periodo, agente y trámite; exportación a CSV e impresión.
+
+Todo lo que se calcula sale del historial de cambios de estado o de columnas
+del expediente, y **lo que no tiene respaldo dice «sin datos suficientes»** en
+lugar de un cero. Detalle en [`PANEL.md`](PANEL.md).
 
 ### 3 · Clientes
 

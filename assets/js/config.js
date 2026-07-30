@@ -15,6 +15,13 @@ window.GT_CONFIG = {
   TABLA_EXPEDIENTES: 'gestotrafic_expedientes',
   TABLA_DOCUMENTOS: 'gestotrafic_documentos',
   TABLA_USUARIOS: 'gestotrafic_usuarios',
+
+  /* Cada cambio de estado de un expediente, con su fecha. Lo escribe un
+     TRIGGER, no la aplicación, y desde el navegador es de SOLO LECTURA: es la
+     prueba de cuánto se tardó, y una prueba que se puede editar no lo es.
+     Sin esta tabla el panel no puede calcular ningún tiempo. */
+  TABLA_HISTORIAL: 'gestotrafic_estado_historial',
+
   BUCKET_DOCS: 'gestotrafic-docs',
 
   // Motor de cálculo ITP (BOE 2026 · Orden HAC/1501/2025)
